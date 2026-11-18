@@ -20,3 +20,8 @@ Render redeploys automatically. Nothing else needs changing:
 
 ## Alternative
 `git checkout d520c7b -- .` restores the same files straight from history.
+
+## Earlier flashcard landing page
+The academic one-page site ("Study less often. Remember more.") is saved in `archive/academic-site-v1/public/`.
+To bring it back: `rm -rf public && cp -a archive/academic-site-v1/public public`, then commit and push.
+(`server.js` already serves whatever is in `public/`.)

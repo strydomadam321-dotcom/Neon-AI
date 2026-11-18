@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Free Study Resources · Flashcards and minimal studying</title>
+<meta name="description" content="Learn less often and remember more. A short guide to flashcards, spaced repetition and minimal studying, with a practice deck you can try.">
+<meta name="theme-color" content="#fbf9f4">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='6' y='4' width='20' height='24' rx='3' fill='%23fbf9f4' stroke='%237a1f2b' stroke-width='2'/%3E%3Cpath d='M10 12h12M10 17h12M10 22h7' stroke='%231b2433' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="#top" aria-label="Free Study Resources, home">
+      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><rect x="6" y="4" width="20" height="24" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 12h12M10 17h12M10 22h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Free Study Resources</span>
+    </a>
+    <nav aria-label="Primary">
+      <a href="#method">Method</a>
+      <a href="#practice">Practice</a>
+      <a href="#schedule">Schedule</a>
+      <a href="#principles">Principles</a>
+      <a href="#sources">Sources</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" id="top">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow">A short guide to remembering</p>
+        <h1>Study less often.<br><em>Remember</em> more.</h1>
+        <p class="lead">Flashcards work because they make you retrieve what you know instead of rereading it. Pair them with a simple review schedule and twenty focused minutes a day will outperform a weekend of cramming.</p>
+        <div class="cta">
+          <a class="btn primary" href="#practice">Try a practice deck</a>
+          <a class="btn" href="#method">How it works</a>
+        </div>
+        <p class="note">Free to use. No account. Nothing to install.</p>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <div class="stack s3"></div>
+        <div class="stack s2"></div>
+        <div class="stack s1">
+          <span class="tag">Question</span>
+          <p>What is the testing effect?</p>
+          <div class="rule"></div>
+          <span class="tag">Answer</span>
+          <p class="ans">Retrieving a fact strengthens memory more than rereading it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="method">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">The method</p>
+        <h2>Three ideas, in order of importance</h2>
+      </header>
+      <ol class="steps">
+        <li>
+          <span class="num">1</span>
+          <h3>Retrieve</h3>
+          <p>Cover the answer and try to produce it from memory. The effort of recalling is what builds the memory. Rereading feels productive but mostly builds familiarity.</p>
+        </li>
+        <li>
+          <span class="num">2</span>
+          <h3>Space it out</h3>
+          <p>Review a card just as you are about to forget it, then wait longer each time it goes well. Short, spread-out sessions beat one long session on the same material.</p>
+        </li>
+        <li>
+          <span class="num">3</span>
+          <h3>Stop early</h3>
+          <p>Finish the cards that are due and close the book. A small daily habit you can sustain is worth more than a heroic session you will not repeat.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="practice" id="practice">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">Practice</p>
+        <h2>Try a deck about studying itself</h2>
+        <p class="sub">Read the question, answer it in your head, then flip the card. Mark it <strong>Again</strong> if you missed it, or <strong>Good</strong> if you knew it. Cards you miss come back.</p>
+      </header>
+
+      <div class="deck" id="deck">
+        <div class="deck-top">
+          <div class="progress" role="progressbar" aria-label="Deck progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="bar"><i></i></div>
+          <p class="count" id="count" aria-live="polite">Card 1 of 8</p>
+        </div>
+
+        <div class="stage" id="stage">
+          <button class="card" id="card" type="button" aria-pressed="false" aria-label="Flashcard. Press to reveal the answer.">
+            <span class="face front"><span class="tag">Question</span><span class="text" id="qText"></span><span class="hintline">Click or press Space to flip</span></span>
+            <span class="face back"><span class="tag">Answer</span><span class="text" id="aText"></span></span>
+          </button>
+        </div>
+
+        <div class="rate" id="rate" hidden>
+          <button type="button" class="btn again" id="again">Again</button>
+          <button type="button" class="btn good" id="good">Good</button>
+        </div>
+
+        <div class="boxes" aria-label="Review boxes">
+          <div class="box"><b id="b1">8</b><span>Box 1</span></div>
+          <div class="box"><b id="b2">0</b><span>Box 2</span></div>
+          <div class="box"><b id="b3">0</b><span>Box 3</span></div>
+          <div class="box done"><b id="b4">0</b><span>Learned</span></div>
+        </div>
+
+        <div class="finish" id="finish" hidden>
+          <h3>Session complete</h3>
+          <p id="finishMsg"></p>
+          <button type="button" class="btn primary" id="restart">Practice again</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="schedule">
+    <div class="wrap two">
+      <div>
+        <header class="sec-head left">
+          <p class="eyebrow">The schedule</p>
+          <h2>A simple box system</h2>
+        </header>
+        <p>The Leitner system needs no software. Keep cards in boxes. A card you get right moves up one box and is reviewed less often. A card you get wrong goes back to the first box.</p>
+        <table class="sched">
+          <caption class="sr">Suggested review frequency by box</caption>
+          <thead><tr><th scope="col">Box</th><th scope="col">Review</th><th scope="col">If correct</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">1</th><td>Every day</td><td>Move to box 2</td></tr>
+            <tr><th scope="row">2</th><td>Every 3 days</td><td>Move to box 3</td></tr>
+            <tr><th scope="row">3</th><td>Every week</td><td>Move to box 4</td></tr>
+            <tr><th scope="row">4</th><td>Every month</td><td>Retire or keep</td></tr>
+          </tbody>
+        </table>
+        <p class="small">If a card is wrong at any stage, it returns to box 1.</p>
+      </div>
+      <figure class="chart">
+        <svg id="curve" viewBox="0 0 520 320" role="img" aria-labelledby="curveT curveD"></svg>
+        <figcaption id="curveD"><strong id="curveT">Illustrative forgetting curves.</strong> Without review, recall falls quickly. Each well-timed review resets the decline and makes it shallower. The shape is a schematic, not measured data.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="principles" id="principles">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow">Minimal studying</p>
+        <h2>Habits that keep it small</h2>
+      </header>
+      <ul class="grid">
+        <li><h3>One idea per card</h3><p>If an answer needs a paragraph, split the card. Short answers are easier to judge honestly.</p></li>
+        <li><h3>Write your own</h3><p>Turning notes into questions is itself a form of study. Borrowed decks teach less than ones you made.</p></li>
+        <li><h3>Cap new cards</h3><p>Add about ten to twenty new cards a day. Every card you add creates future reviews.</p></li>
+        <li><h3>Keep sessions short</h3><p>Twenty to thirty minutes, once a day. Stop when the due pile is empty.</p></li>
+        <li><h3>Be honest</h3><p>Mark a card as missed if you hesitated or only half knew it. Easy ratings feel nice and cost you later.</p></li>
+        <li><h3>Sleep on it</h3><p>Memory consolidates overnight. A rested morning review is worth more than a late extra hour.</p></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band sources" id="sources">
+    <div class="wrap narrow">
+      <header class="sec-head left">
+        <p class="eyebrow">Sources</p>
+        <h2>Further reading</h2>
+      </header>
+      <ul class="refs">
+        <li>Ebbinghaus, H. (1885). <i>Über das Gedächtnis</i>. Leipzig: Duncker &amp; Humblot.</li>
+        <li>Roediger, H. L., &amp; Karpicke, J. D. (2006). Test-enhanced learning: Taking memory tests improves long-term retention. <i>Psychological Science, 17</i>(3), 249–255.</li>
+        <li>Cepeda, N. J., Pashler, H., Vul, E., Wixted, J. T., &amp; Rohrer, D. (2006). Distributed practice in verbal recall tasks: A review and quantitative synthesis. <i>Psychological Bulletin, 132</i>(3), 354–380.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p><strong>Free Study Resources</strong></p>
+    <p class="small">A small, free guide to studying with flashcards.</p>
+  </div>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
