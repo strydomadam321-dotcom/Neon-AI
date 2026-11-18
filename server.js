@@ -221,11 +221,16 @@ app.post("/api/logout", wrap(async (req, res) => {
 app.get("/api/me", requireAuth, (req, res) => res.json({ user: { username: req.user.username }, settings: req.user.settings }));
 
 app.put("/api/settings", requireAuth, small, wrap(async (req, res) => {
-  const { system, model, effort } = req.body || {};
+  const cur = req.user.settings || {};
+  const { system, model, effort, retro, bg, flicker } = req.body || {};
+  const bool = (v, d) => (typeof v === "boolean" ? v : typeof cur[d.key] === "boolean" ? cur[d.key] : d.def);
   const s = {
-    system: typeof system === "string" ? system.slice(0, 4000) : "",
-    model: MODELS.some((m) => m.id === model) ? model : "",
-    effort: [0, 1, 2, 3].includes(effort) ? effort : DEFAULT_EFFORT,
+    system: typeof system === "string" ? system.slice(0, 4000) : cur.system || "",
+    model: model === undefined ? cur.model || "" : MODELS.some((m) => m.id === model) ? model : "",
+    effort: [0, 1, 2, 3].includes(effort) ? effort : [0, 1, 2, 3].includes(cur.effort) ? cur.effort : DEFAULT_EFFORT,
+    retro: bool(retro, { key: "retro", def: false }),
+    bg: bool(bg, { key: "bg", def: true }),
+    flicker: bool(flicker, { key: "flicker", def: true }),
   };
   await q("update users set settings = $1 where id = $2", [s, req.user.id]);
   res.json({ settings: s });

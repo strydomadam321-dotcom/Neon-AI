@@ -17,13 +17,22 @@ const ls = {
 // ---------- state ----------
 let config = { models: [], defaultModel: "", needsInvite: false, hasKey: true, hasGemini: false, defaultEffort: 1 };
 let user = null;
-let settings = { system: "", model: "", effort: 1 };
+let settings = { system: "", model: "", effort: 1, retro: false, bg: true, flicker: true };
 let chats = [];          // metadata list for the sidebar: {id,title,model,created,updated}
 let current = null;      // active chat (full object incl. messages)
 let pending = [];        // attachments waiting to be sent
 let busy = false;
 let abortCtl = null;
 let syncTimer = 0;
+
+// ---------- look: retro theme + animation switches (kept on this device too, so even the sign-in screen matches) ----------
+function applyLook() {
+  const R = document.documentElement;
+  if (settings.retro) R.dataset.theme = "retro"; else delete R.dataset.theme;
+  R.classList.toggle("no-bg-anim", settings.bg === false);
+  R.classList.toggle("no-flicker", settings.flicker === false);
+  try { localStorage.setItem("neon-look", JSON.stringify({ retro: !!settings.retro, bg: settings.bg !== false, flicker: settings.flicker !== false })); } catch {}
+}
 
 // ---------- toasts + dialogs ----------
 function toast(msg, kind = "ok") {
@@ -141,6 +150,7 @@ function showAuth(msg = "") {
   if (busy) abortCtl?.abort();
   user = null; current = null; chats = [];
   $("app").classList.add("hidden");
+  document.body.classList.remove("in-app");
   $("auth").classList.remove("hidden");
   setMode("login");
   authEls.err.textContent = msg;
@@ -646,7 +656,8 @@ function syncEffortUI() {
   document.querySelectorAll(".eff-ticks span").forEach((t, i) => t.classList.toggle("on", i === settings.effort));
 }
 let saveT = 0;
-function saveSettingsQuiet() { clearTimeout(saveT); saveT = setTimeout(() => api("/api/settings", { method: "PUT", body: { system: settings.system || "", model: els.model.value, effort: settings.effort } }).then((r) => { if (r?.settings) settings = { ...settings, ...r.settings }; }).catch(() => {}), 400); }
+function settingsPayload(system) { return { system: system ?? settings.system ?? "", model: els.model.value, effort: settings.effort, retro: !!settings.retro, bg: settings.bg !== false, flicker: settings.flicker !== false }; }
+function saveSettingsQuiet() { clearTimeout(saveT); saveT = setTimeout(() => api("/api/settings", { method: "PUT", body: settingsPayload() }).then((r) => { if (r?.settings) settings = { ...settings, ...r.settings }; }).catch(() => {}), 400); }
 function setEffort(v) { settings.effort = Math.max(0, Math.min(3, Number(v))); syncEffortUI(); saveSettingsQuiet(); }
 function toggleEff(open = !eff.root.classList.contains("open")) {
   eff.root.classList.toggle("open", open);
@@ -668,18 +679,28 @@ document.querySelectorAll(".chip").forEach((c) => (c.onclick = () => sendMessage
 
 function openSettings() {
   $("sysPrompt").value = settings.system || "";
+  $("optRetro").checked = !!settings.retro;
+  $("optBg").checked = settings.bg !== false;
+  $("optFlicker").checked = settings.flicker !== false;
   $("settings").classList.remove("hidden");
+  $("settings").querySelector(".set-body").scrollTop = 0;
 }
 function closeSettings() { $("settings").classList.add("hidden"); }
 $("settingsBtn").onclick = openSettings;
 $("closeSettings").onclick = closeSettings;
 $("settings").onmousedown = (e) => { if (e.target === $("settings")) closeSettings(); };
+// appearance switches apply instantly and are remembered on your account and on this device
+[["optRetro", "retro"], ["optBg", "bg"], ["optFlicker", "flicker"]].forEach(([id, key]) => {
+  $(id).addEventListener("change", () => { settings[key] = $(id).checked; applyLook(); saveSettingsQuiet(); });
+});
 $("saveSettings").onclick = async () => {
   try {
-    const r = await api("/api/settings", { method: "PUT", body: { system: $("sysPrompt").value.trim(), model: els.model.value, effort: settings.effort } });
-    settings = r.settings; closeSettings(); toast("Settings saved.");
+    const sys = $("sysPrompt").value.trim();
+    const r = await api("/api/settings", { method: "PUT", body: settingsPayload(sys) });
+    settings = { ...settings, ...r.settings }; applyLook(); closeSettings(); toast("Settings saved.");
   } catch (err) { toast(err.message, "err"); }
 };
+$("signOutBtn").onclick = () => { closeSettings(); $("logoutBtn").click(); };
 $("clearAll").onclick = async () => {
   if (!(await dialog({ title: "Delete ALL chats?", message: "This permanently removes every chat on your account, on all devices.", ok: "Delete everything", danger: true }))) return;
   try {
@@ -744,8 +765,8 @@ addEventListener("focus", syncNow);
 
 // ---------- boot ----------
 async function enterApp(data) {
-  user = data.user; settings = { system: "", model: "", effort: config.defaultEffort ?? 1, ...(data.settings || {}) };
-  $("auth").classList.add("hidden"); $("app").classList.remove("hidden");
+  user = data.user; settings = { system: "", model: "", effort: config.defaultEffort ?? 1, retro: false, bg: true, flicker: true, ...(data.settings || {}) };
+  $("auth").classList.add("hidden"); $("app").classList.remove("hidden"); document.body.classList.add("in-app"); applyLook();
   $("meName").textContent = user.username; $("meAvatar").textContent = user.username[0];
   $("setName").textContent = user.username; $("setAvatar").textContent = user.username[0];
   els.model.innerHTML = "";

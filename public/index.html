@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#05060d">
 <title>NEON AI</title>
+<script>
+try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = document.documentElement;
+  if (L.retro) R.dataset.theme = "retro"; if (L.bg === false) R.classList.add("no-bg-anim"); if (L.flicker === false) R.classList.add("no-flicker"); } catch (e) {}
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300e5ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13 2 3 14h9l-1 8 10-12h-9Z'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,6 +23,7 @@
   <defs>
     <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4 20V14M10 20V9M16 20V5M22 20V2"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 1 10-10c0 3-2.5 4-4.5 4H15a2 2 0 0 0-1.4 3.4c.6.6.4 2.6-1.6 2.6Z"/><circle cx="7.5" cy="11" r="1"/><circle cx="12" cy="7" r="1"/><circle cx="16.5" cy="10" r="1"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
     <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
     <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/></symbol>
@@ -55,6 +60,9 @@
   </defs>
 </svg>
 
+<!-- retro (synthwave) scene: sky sits under the star canvas -->
+<div class="rs-sky" aria-hidden="true"></div>
+
 <!-- atmosphere -->
 <canvas id="fx" aria-hidden="true"></canvas>
 <div class="atmos" aria-hidden="true">
@@ -64,6 +72,45 @@
   <div class="vignette"></div>
   <div class="scan"></div>
 </div>
+<!-- retro scene foreground: sun, mountains, palms, neon grid -->
+<div class="rs-front" aria-hidden="true">
+  <div class="rs-sun"><svg viewBox="0 0 400 400"><defs>
+    <linearGradient id="sunG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff1b8"/><stop offset=".34" stop-color="#ffb86b"/><stop offset=".66" stop-color="#ff5fb8"/><stop offset="1" stop-color="#a64bd8"/></linearGradient>
+    <mask id="sunM"><rect width="400" height="400" fill="#fff"/><rect y="238" width="400" height="5"/><rect y="264" width="400" height="8"/><rect y="294" width="400" height="11"/><rect y="328" width="400" height="14"/><rect y="366" width="400" height="18"/></mask>
+  </defs><circle cx="200" cy="200" r="198" fill="url(#sunG)" mask="url(#sunM)"/></svg></div>
+
+  <svg class="rs-mtn far" viewBox="0 0 1440 220" preserveAspectRatio="none"><defs>
+    <linearGradient id="mtnF" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8c35b8"/><stop offset="1" stop-color="#3b1070"/></linearGradient></defs>
+    <path d="M0 220V150l120-40 100 40 120-60 130 70 130-40 160 50 140-70 140 50 140-65 120 50 100-30v135Z" fill="url(#mtnF)"/>
+    <path d="M0 150l120-40 100 40 120-60 130 70 130-40 160 50 140-70 140 50 140-65 120 50 100-30" fill="none" stroke="#ff7ad8" stroke-opacity=".55" stroke-width="2"/></svg>
+  <svg class="rs-mtn near" viewBox="0 0 1440 220" preserveAspectRatio="none">
+    <path d="M0 220V175l180-35 150 45 190-35 180 40 180-30 180 35 190-45 190 30v35Z" fill="#2a0b58"/></svg>
+
+  <svg width="0" height="0" style="position:absolute"><defs>
+    <path id="frond" d="M0 0C55-62 140-52 200 24C140-18 66-22 0 7Z"/>
+    <symbol id="palm" viewBox="0 0 400 520">
+      <path d="M158 520C176 400 190 262 196 128l16 0c0 140-12 280-22 392Z"/>
+      <g transform="translate(204 126)">
+        <use href="#frond" transform="rotate(-8)"/><use href="#frond" transform="rotate(-38) scale(.92)"/><use href="#frond" transform="rotate(-70) scale(.8)"/>
+        <use href="#frond" transform="rotate(22) scale(.95)"/><use href="#frond" transform="rotate(46) scale(.7)"/>
+        <use href="#frond" transform="scale(-1 1) rotate(-8)"/><use href="#frond" transform="scale(-1 1) rotate(-38) scale(.92)"/><use href="#frond" transform="scale(-1 1) rotate(-70) scale(.8)"/>
+        <use href="#frond" transform="scale(-1 1) rotate(22) scale(.95)"/><use href="#frond" transform="scale(-1 1) rotate(46) scale(.7)"/>
+        <use href="#frond" transform="rotate(-100) scale(.55)"/><use href="#frond" transform="scale(-1 1) rotate(-100) scale(.55)"/>
+        <circle r="9"/>
+      </g>
+    </symbol></defs></svg>
+  <svg class="rs-palm p1" viewBox="0 0 400 520"><use href="#palm"/></svg>
+  <svg class="rs-palm p2" viewBox="0 0 400 520"><use href="#palm"/></svg>
+  <svg class="rs-palm p3" viewBox="0 0 400 520"><use href="#palm"/></svg>
+  <svg class="rs-palm p4" viewBox="0 0 400 520"><use href="#palm"/></svg>
+  <svg class="rs-palm p5" viewBox="0 0 400 520"><use href="#palm"/></svg>
+  <svg class="rs-palm p6" viewBox="0 0 400 520"><use href="#palm"/></svg>
+
+  <div class="rs-horizon"></div>
+  <div class="rs-ground"><div class="rs-grid"></div></div>
+  <div class="rs-dim"></div>
+</div>
+
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <!-- auth -->
@@ -194,18 +241,58 @@
 
 <!-- settings -->
 <div id="settings" class="overlay hidden">
-  <div class="card spot">
+  <div class="card settings spot" role="dialog" aria-modal="true" aria-labelledby="setTitle">
     <div class="card-head">
-      <h3>Settings</h3>
+      <h3 id="setTitle">Settings</h3>
       <button class="icon" id="closeSettings" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
     </div>
-    <label class="lbl">Signed in as</label>
-    <div class="who"><div class="avatar sm" id="setAvatar">?</div><span id="setName"></span></div>
-    <label class="lbl" for="sysPrompt">Custom instructions (optional, synced to your account)</label>
-    <textarea id="sysPrompt" rows="5" placeholder="e.g. You are a pirate who explains code."></textarea>
-    <div class="row">
-      <button id="clearAll" class="btn danger"><svg class="ic"><use href="#i-trash"/></svg>Delete all chats</button>
-      <button id="deleteAcct" class="btn danger"><svg class="ic"><use href="#i-user"/></svg>Delete account</button>
+
+    <div class="set-body">
+      <section class="sec">
+        <h4>Account</h4>
+        <div class="set-row">
+          <div class="who"><div class="avatar sm" id="setAvatar">?</div><div class="txt"><b id="setName"></b><span>Your chats sync to this account on every device</span></div></div>
+          <button id="signOutBtn" class="btn small"><svg class="ic"><use href="#i-logout"/></svg>Sign out</button>
+        </div>
+      </section>
+
+      <section class="sec">
+        <h4>Appearance</h4>
+        <label class="set-row toggle">
+          <div class="txt"><b>Retro mode</b><span>Synthwave sunset with palm trees and a neon grid</span></div>
+          <input type="checkbox" id="optRetro" role="switch"><span class="sw"></span>
+        </label>
+        <label class="set-row toggle">
+          <div class="txt"><b>Animated background</b><span>Drifting particles, light rays and the moving grid</span></div>
+          <input type="checkbox" id="optBg" role="switch"><span class="sw"></span>
+        </label>
+        <label class="set-row toggle">
+          <div class="txt"><b>Flickering neon text</b><span>The glitchy flicker on the NEON AI logo</span></div>
+          <input type="checkbox" id="optFlicker" role="switch"><span class="sw"></span>
+        </label>
+      </section>
+
+      <section class="sec">
+        <h4>AI</h4>
+        <label class="lbl" for="sysPrompt">Custom instructions (optional, synced to your account)</label>
+        <textarea id="sysPrompt" rows="5" placeholder="e.g. You are a pirate who explains code."></textarea>
+        <p class="hint-sm">Model and effort are picked from the buttons at the top of a chat.</p>
+      </section>
+
+      <section class="sec danger-zone">
+        <h4>Danger zone</h4>
+        <div class="set-row">
+          <div class="txt"><b>Delete all chats</b><span>Removes every conversation from all your devices</span></div>
+          <button id="clearAll" class="btn danger"><svg class="ic"><use href="#i-trash"/></svg>Delete all chats</button>
+        </div>
+        <div class="set-row">
+          <div class="txt"><b>Delete account</b><span>Permanently erases your account and all of its chats</span></div>
+          <button id="deleteAcct" class="btn danger"><svg class="ic"><use href="#i-user"/></svg>Delete account</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="set-foot">
       <span class="spacer"></span>
       <button id="saveSettings" class="btn primary">Save</button>
     </div>

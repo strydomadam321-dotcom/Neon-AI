@@ -41,7 +41,7 @@
   const cv = document.getElementById("fx");
   if (!cv || reduced) return;
   const ctx = cv.getContext("2d");
-  let w = 0, h = 0, dpr = 1, pts = [], raf = 0;
+  let w = 0, h = 0, dpr = 1, pts = [], stars = [], shoot = null, nextShoot = 0, raf = 0;
   const mouse = { x: -9999, y: -9999 };
   const COLORS = ["0,229,255", "255,43,214", "139,92,246"];
 
@@ -51,6 +51,11 @@
     cv.width = w * dpr; cv.height = h * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const n = Math.round(Math.min(90, (w * h) / 22000));
+    const ns = Math.round(Math.min(220, (w * h) / 7000));
+    stars = Array.from({ length: ns }, () => ({
+      x: Math.random() * w, y: Math.random() * h * 0.62, r: Math.random() * 1.3 + 0.3,
+      ph: Math.random() * 6.28, sp: 0.6 + Math.random() * 1.6, c: Math.random() < 0.18 ? "255,150,230" : Math.random() < 0.12 ? "140,240,255" : "255,255,255",
+    }));
     pts = Array.from({ length: n }, () => ({
       x: Math.random() * w, y: Math.random() * h,
       vx: (Math.random() - .5) * .35, vy: (Math.random() - .5) * .35,
@@ -58,7 +63,28 @@
     }));
   }
 
+  function retroFrame(t) {
+    ctx.clearRect(0, 0, w, h);
+    for (const st of stars) {
+      const a = 0.35 + 0.65 * Math.abs(Math.sin(t / 1000 * st.sp + st.ph));
+      ctx.fillStyle = `rgba(${st.c},${a})`;
+      ctx.beginPath(); ctx.arc(st.x, st.y, st.r, 0, 6.283); ctx.fill();
+    }
+    // an occasional shooting star
+    if (!shoot && t > nextShoot) { shoot = { x: Math.random() * w * 0.7 + w * 0.1, y: Math.random() * h * 0.25, vx: 7 + Math.random() * 4, vy: 3 + Math.random() * 2, life: 1 }; nextShoot = t + 5000 + Math.random() * 7000; }
+    if (shoot) {
+      const g = ctx.createLinearGradient(shoot.x, shoot.y, shoot.x - shoot.vx * 9, shoot.y - shoot.vy * 9);
+      g.addColorStop(0, `rgba(255,255,255,${shoot.life})`); g.addColorStop(1, "rgba(255,120,220,0)");
+      ctx.strokeStyle = g; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(shoot.x, shoot.y); ctx.lineTo(shoot.x - shoot.vx * 9, shoot.y - shoot.vy * 9); ctx.stroke();
+      shoot.x += shoot.vx; shoot.y += shoot.vy; shoot.life -= 0.012;
+      if (shoot.life <= 0 || shoot.x > w || shoot.y > h * 0.7) shoot = null;
+    }
+  }
+
   function frame(t) {
+    const root = document.documentElement;
+    if (root.classList.contains("no-bg-anim")) { raf = requestAnimationFrame(frame); return; }
+    if (root.dataset.theme === "retro") { retroFrame(t); raf = requestAnimationFrame(frame); return; }
     ctx.clearRect(0, 0, w, h);
     const LINK = 130;
     for (let i = 0; i < pts.length; i++) {
