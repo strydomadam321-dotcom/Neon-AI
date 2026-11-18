@@ -16,7 +16,9 @@ const MODELS = [
 ];
 const DEFAULT_MODEL = process.env.DEFAULT_MODEL || MODELS[0].id;
 // Signup gate: people must answer this question to create an account (keeps strangers from spending your credits).
-const SIGNUP_ANSWER = (process.env.SIGNUP_ANSWER || "ivke").trim().toLowerCase();
+// The answer lives only in the SIGNUP_ANSWER environment variable (never in the code). If it is unset, signups are closed.
+const SIGNUP_ANSWER = (process.env.SIGNUP_ANSWER || "").trim().toLowerCase();
+if (!SIGNUP_ANSWER) console.warn("SIGNUP_ANSWER is not set: new signups are disabled.");
 const SYSTEM =
   "You are a helpful, sharp AI assistant inside a futuristic neon chat app. " +
   "Answer clearly and concisely. Use Markdown, and fenced code blocks with language tags for code.";
@@ -160,6 +162,7 @@ app.post("/api/signup", small, wrap(async (req, res) => {
   if (Buffer.byteLength(password) > 72)
     return res.status(400).json({ error: "Password is too long (72 bytes max).", field: "password" });
   {
+    if (!SIGNUP_ANSWER) return res.status(503).json({ error: "Signups are currently closed." });
     const a = Buffer.from(String(answer || "").trim().toLowerCase()), b = Buffer.from(SIGNUP_ANSWER);
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b))
       return res.status(403).json({ error: "That's not the right answer.", field: "answer" });

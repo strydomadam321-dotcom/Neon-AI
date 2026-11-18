@@ -14,7 +14,7 @@ A neon, ChatGPT-style web chat for Claude. Accounts with username + password, ch
 |---|---|---|
 | `DATABASE_URL` | yes | Postgres connection string (Render fills this in from `render.yaml`) |
 | `ANTHROPIC_API_KEY` | yes | Your Anthropic key |
-| `SIGNUP_ANSWER` | no | Answer to the signup question ("What is your youngest cousin's name?"). Defaults to the built-in answer; set it to change the answer without touching code |
+| `SIGNUP_ANSWER` | yes | Secret answer to the signup question. If unset, signups are closed |
 | `DEFAULT_MODEL` | no | `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` |
 
 ## Run locally
