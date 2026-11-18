@@ -273,6 +273,73 @@ app.patch("/api/chats/:id", requireAuth, small, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ---------- automatic chat titles ----------
+// Same rule the browser uses for the temporary title (first message, shortened).
+const fallbackTitle = (text) => String(text || "").replace(/\s+/g, " ").trim().slice(0, 48);
+const TITLE_PROMPT =
+  "Write a short title that summarises this conversation in 2 to 5 words. " +
+  "Use the same language as the user. Reply with ONLY the title: no quotes, no trailing punctuation, no emoji.";
+
+function cleanTitle(raw) {
+  let t = String(raw || "").split("\n")[0].replace(/^["'`*#\s]+|["'`*.\s]+$/g, "").replace(/\s+/g, " ");
+  t = t.replace(/^title\s*:\s*/i, "");
+  return t.length > 60 ? t.slice(0, 60).replace(/\s+\S*$/, "") : t;
+}
+
+async function titleViaGemini(convo) {
+  const m = GEMINI_MODELS.find((x) => /lite/i.test(x.id)) || GEMINI_MODELS.find((x) => /flash/i.test(x.id)) || GEMINI_MODELS[0];
+  if (!GEMINI_KEY || !m) return "";
+  const gc = { maxOutputTokens: 40, temperature: 0.4 };
+  const th = geminiThinking(m.id, 0);
+  const body = (withTh) => JSON.stringify({
+    systemInstruction: { parts: [{ text: TITLE_PROMPT }] },
+    contents: [{ role: "user", parts: [{ text: convo }] }],
+    generationConfig: withTh && th ? { ...gc, thinkingConfig: th } : gc,
+  });
+  const call = async (withTh) => {
+    const r = await fetch(`${GEMINI_BASE}/v1beta/models/${encodeURIComponent(m.id)}:generateContent`, {
+      method: "POST", signal: AbortSignal.timeout(15000),
+      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY }, body: body(withTh),
+    });
+    if (!r.ok) { const e = new Error("gemini " + r.status); e.status = r.status; throw e; }
+    const j = await r.json();
+    return (j.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("");
+  };
+  try { return await call(true); }
+  catch (e) { if (e.status === 400) return await call(false); throw e; }
+}
+
+async function titleViaClaude(convo) {
+  if (!process.env.ANTHROPIC_API_KEY) return "";
+  const m = CLAUDE_MODELS.find((x) => /haiku/i.test(x.id)) || CLAUDE_MODELS[0];
+  const r = await client.messages.create({
+    model: m.id, max_tokens: 40, system: TITLE_PROMPT,
+    messages: [{ role: "user", content: convo }],
+  }, { timeout: 15000 });
+  return r.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+}
+
+app.post("/api/chats/:id/title", requireAuth, wrap(async (req, res) => {
+  if (limited("title:" + req.user.id, 30, 60e3)) return res.json({ title: null });
+  const { rows } = await q("select title,messages from chats where user_id=$1 and id=$2", [req.user.id, req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: "Chat not found" });
+  const msgs = rows[0].messages || [];
+  const u = msgs.find((m) => m.role === "user"), a = msgs.find((m) => m.role === "assistant" && m.text);
+  if (!u || !a) return res.json({ title: null });
+  const userText = u.text?.trim() || (u.attachments || []).map((x) => x.name).join(", ");
+  // never overwrite a title the user set themselves
+  if (rows[0].title !== fallbackTitle(u.text?.trim() || u.attachments?.[0]?.name || "New chat")) return res.json({ title: null });
+  const convo = `User: ${userText.slice(0, 600)}\n\nAssistant: ${String(a.text).slice(0, 600)}`;
+  let title = "";
+  for (const fn of [titleViaGemini, titleViaClaude]) {
+    try { title = cleanTitle(await fn(convo)); } catch (e) { console.warn("title:", fn.name, e.message); }
+    if (title) break;
+  }
+  if (!title) return res.json({ title: null });
+  await q("update chats set title=$1 where user_id=$2 and id=$3 and title=$4", [title, req.user.id, req.params.id, rows[0].title]);
+  res.json({ title });
+}));
+
 app.delete("/api/chats/:id", requireAuth, wrap(async (req, res) => {
   await q("delete from chats where user_id=$1 and id=$2", [req.user.id, req.params.id]);
   res.json({ ok: true });

@@ -419,8 +419,20 @@ async function streamReply() {
   setBusy(false); abortCtl = null;
   if (!user) return;
   if (text || errMsg) chat.messages.push({ role: "assistant", text, ...(errMsg ? { err: errMsg } : {}) });
-  await persist(chat);
+  const saved = await persist(chat);
   if (current === chat) renderMessages();
+  if (saved && !errMsg && text && chat.messages.length === 2) autoTitle(chat);
+}
+
+// ask the server for a short summary title (a few words) after the first reply
+async function autoTitle(chat) {
+  const temp = chat.title;
+  try {
+    const r = await api(`/api/chats/${chat.id}/title`, { method: "POST", noAuthRedirect: true });
+    if (!r?.title || chat.title !== temp) return;   // nothing new, or the user renamed it meanwhile
+    chat.title = r.title; upsertMeta(chat); renderList();
+    if (current === chat) els.title.textContent = r.title;
+  } catch {}
 }
 
 async function sendMessage(textOverride) {
