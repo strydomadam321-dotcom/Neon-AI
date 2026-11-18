@@ -495,7 +495,7 @@ header { position: relative; z-index: 30; display: flex; align-items: center; ga
 /* =====================================================================
    Settings (sectioned, scrolls on small screens)
    ===================================================================== */
-.card.settings { width: min(580px, 100%); max-height: calc(100dvh - 40px); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.card.settings { position: relative; width: min(580px, 100%); max-height: calc(100dvh - 40px); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .card.settings .card-head { padding: 22px 26px 14px; margin: 0; }
 .set-body { overflow-y: auto; padding: 0 26px 6px; flex: 1; min-height: 0; }
 .set-body::-webkit-scrollbar { width: 8px; } .set-body::-webkit-scrollbar-thumb { background: rgba(var(--lrgb), .25); border-radius: 8px; }
@@ -510,10 +510,10 @@ header { position: relative; z-index: 30; display: flex; align-items: center; ga
 .set-row .who .txt b { overflow: hidden; text-overflow: ellipsis; }
 .set-row.toggle { cursor: pointer; }
 .set-row.toggle input { position: absolute; opacity: 0; pointer-events: none; }
-.sw { position: relative; flex: none; width: 48px; height: 28px; border-radius: 28px; background: rgba(255, 255, 255, .09); border: 1px solid var(--line2); transition: background .3s, box-shadow .3s, border-color .3s; }
+.sw { position: relative; flex: none; width: 48px; height: 28px; border-radius: 28px; background-color: rgba(255, 255, 255, .09); background-origin: border-box; background-clip: border-box; border: 1px solid var(--line2); transition: background .3s, box-shadow .3s, border-color .3s; }
 .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #dfe3ff; box-shadow: 0 2px 6px rgba(0, 0, 0, .45); transition: transform .3s cubic-bezier(.3, 1.6, .5, 1), background .3s; }
 .set-row.toggle:hover .sw { border-color: var(--cyan); }
-.set-row.toggle input:checked + .sw { background: linear-gradient(90deg, var(--cyan), var(--mag)); border-color: transparent; box-shadow: 0 0 18px rgba(var(--a1), .5); }
+.set-row.toggle input:checked + .sw { background-image: linear-gradient(90deg, var(--cyan), var(--mag)); border-color: transparent; box-shadow: 0 0 18px rgba(var(--a1), .5); }
 .set-row.toggle input:checked + .sw::after { transform: translateX(20px); background: #fff; }
 .set-row.toggle input:focus-visible + .sw { outline: 2px solid var(--cyan); outline-offset: 3px; }
 .hint-sm { margin: 8px 2px 0; font-size: 12.5px; color: var(--faint); }
@@ -522,7 +522,7 @@ header { position: relative; z-index: 30; display: flex; align-items: center; ga
 .set-foot { display: flex; align-items: center; gap: 10px; padding: 14px 26px 20px; border-top: 1px solid var(--line); }
 @media (max-width: 560px) {
   .card.settings .card-head, .set-foot { padding-left: 18px; padding-right: 18px; } .set-body { padding: 0 18px 6px; }
-  .set-row { flex-wrap: wrap; } .danger-zone .set-row .btn { width: 100%; }
+  .set-row:not(.toggle) { flex-wrap: wrap; } .set-row.toggle { flex-wrap: nowrap; } .danger-zone .set-row .btn { width: 100%; }
 }
 
 /* =====================================================================
@@ -530,7 +530,8 @@ header { position: relative; z-index: 30; display: flex; align-items: center; ga
    ===================================================================== */
 .no-bg-anim #fx { display: none; }
 .no-bg-anim .blob, .no-bg-anim .rays, .no-bg-anim .gridfloor, .no-bg-anim .scan::after { animation: none !important; }
-.no-bg-anim .rs-grid, .no-bg-anim .rs-sun svg, .no-bg-anim .rs-palm { animation: none !important; }
+.no-bg-anim .rs-grid::before, .no-bg-anim .rs-sun::after, .no-bg-anim .rs-sun::before, .no-bg-anim .rs-palm, .no-bg-anim .rs-clouds i, .no-bg-anim .rs-ground::after, .no-bg-anim .rs-horizon, .no-bg-anim .rs-front::after, .no-bg-anim .rs-mtn.far path + path { animation: none !important; }
+.no-bg-anim #fx2 { display: none; }
 .no-flicker .neon-logo .l, .no-flicker .neon-logo .l.dying { animation: none !important; opacity: 1 !important; text-shadow: var(--on) !important; }
 
 /* =====================================================================
@@ -561,8 +562,10 @@ header { position: relative; z-index: 30; display: flex; align-items: center; ga
 :root[data-theme="retro"] #fx { z-index: 0; }
 
 .rs-sun { position: absolute; left: 50%; width: var(--sw); height: var(--sw); top: calc(var(--hz) - var(--sw) * .86); transform: translateX(-50%); }
-.rs-sun svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 0 46px rgba(255, 100, 190, .65)); animation: sunpulse 6s ease-in-out infinite; }
-@keyframes sunpulse { 50% { filter: drop-shadow(0 0 80px rgba(255, 150, 170, .9)); } }
+.rs-sun svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 0 46px rgba(255, 100, 190, .65)); position: relative; }
+.rs-sun::after { content: ""; position: absolute; inset: -34%; border-radius: 50%; pointer-events: none; mix-blend-mode: screen; will-change: opacity;
+  background: radial-gradient(circle, rgba(255, 130, 190, .5), rgba(255, 130, 190, 0) 62%); animation: sunpulse 6s ease-in-out infinite alternate; }
+@keyframes sunpulse { from { opacity: .35; } to { opacity: 1; } }
 
 .rs-mtn { position: absolute; left: 0; width: 100%; bottom: calc(100% - var(--hz)); height: 19vh; display: block; }
 .rs-mtn.near { height: 11vh; }
@@ -579,12 +582,16 @@ header { position: relative; z-index: 30; display: flex; align-items: center; ga
 .rs-horizon { position: absolute; left: 0; right: 0; top: calc(var(--hz) - 2px); height: 4px; background: linear-gradient(90deg, transparent, #ffc2ee 18%, #fff 50%, #ffc2ee 82%, transparent); filter: blur(1px) drop-shadow(0 0 16px #ff5fd8); }
 .rs-ground { position: absolute; left: 0; right: 0; top: var(--hz); bottom: 0; overflow: hidden; background: linear-gradient(to bottom, #43107f 0%, #1d0645 38%, #0e0228 100%); }
 .rs-grid {
-  position: absolute; left: -70%; right: -70%; top: 0; height: 260%; transform-origin: 50% 0; transform: perspective(360px) rotateX(74deg);
-  background-image: linear-gradient(rgba(61, 240, 255, .95) 2px, transparent 2px), linear-gradient(90deg, rgba(61, 240, 255, .95) 2px, transparent 2px);
-  background-size: 76px 76px; animation: gridrun 1.5s linear infinite; filter: drop-shadow(0 0 5px rgba(61, 240, 255, .8));
+  position: absolute; left: -70%; right: -70%; top: 0; height: 260%; transform-origin: 50% 0; transform: perspective(360px) rotateX(74deg); overflow: hidden;
+  filter: drop-shadow(0 0 5px rgba(61, 240, 255, .8));
   -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 14%); mask-image: linear-gradient(to bottom, transparent 0%, #000 14%);
 }
-@keyframes gridrun { to { background-position: 0 76px, 76px 0; } }
+.rs-grid::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -76px; bottom: 0; will-change: transform;
+  background-image: linear-gradient(rgba(61, 240, 255, .95) 2px, transparent 2px), linear-gradient(90deg, rgba(61, 240, 255, .95) 2px, transparent 2px);
+  background-size: 76px 76px; animation: gridrun 1.5s linear infinite;
+}
+@keyframes gridrun { to { transform: translateY(76px); } }
 
 /* keeps text readable once you are inside the app; the sign-in screen shows the full scene */
 .rs-dim { position: absolute; inset: 0; opacity: 0; transition: opacity .7s; background: linear-gradient(to bottom, rgba(var(--deep), .64), rgba(var(--deep), .5) 55%, rgba(var(--deep), .22)); }
@@ -604,3 +611,54 @@ body.in-app .rs-dim { opacity: 1; }
   :root[data-theme="retro"] { --hz: 66%; --sw: min(70vw, 420px); }
   .rs-palm.p1 { height: 58vh; left: -14vw; } .rs-palm.p4 { height: 46vh; right: -12vw; } .rs-palm.p3, .rs-palm.p6 { display: none; }
 }
+
+/* ---------- "unsaved changes" bar ---------- */
+.unsaved {
+  position: absolute; left: 16px; right: 16px; bottom: 76px; z-index: 5; display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px; border-radius: 14px;
+  background: rgba(var(--pop), .985); border: 1px solid rgba(255, 179, 71, .6); box-shadow: 0 14px 40px rgba(0, 0, 0, .55), 0 0 26px rgba(255, 179, 71, .18);
+  animation: unsavedin .35s cubic-bezier(.2, 1.2, .4, 1) both;
+}
+.unsaved .warn { color: #ffb347; filter: drop-shadow(0 0 5px #ffb347); }
+.unsaved > span { flex: 1; min-width: 0; font-weight: 600; font-size: 14px; }
+.unsaved.shake { animation: unsavedshake .45s; border-color: #ff5c7a; box-shadow: 0 14px 40px rgba(0, 0, 0, .55), 0 0 30px rgba(255, 92, 122, .45); }
+@keyframes unsavedin { from { opacity: 0; transform: translateY(16px) scale(.96); } }
+@keyframes unsavedshake { 15%, 55% { transform: translateX(-7px); } 35%, 75% { transform: translateX(7px); } }
+@media (max-width: 560px) { .unsaved { flex-wrap: wrap; } .unsaved > span { flex-basis: calc(100% - 40px); } .unsaved .btn { flex: 1; } }
+
+/* ---------- more retro effects ---------- */
+#fx2 { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; display: none; }
+:root[data-theme="retro"] #fx2 { display: block; }
+
+/* slow rotating sunburst behind the sun */
+.rs-sun::before { content: ""; position: absolute; inset: -75%; border-radius: 50%; mix-blend-mode: screen; opacity: .55;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 150, 210, .28) 0 2.4deg, transparent 2.4deg 11deg);
+  -webkit-mask-image: radial-gradient(circle, #000 14%, transparent 62%); mask-image: radial-gradient(circle, #000 14%, transparent 62%);
+  animation: burst 140s linear infinite; }
+@keyframes burst { to { transform: rotate(360deg); } }
+
+/* glowing streaks of cloud drifting across the sky */
+.rs-clouds i { position: absolute; left: 0; height: 7px; width: 34vw; border-radius: 8px; filter: blur(3px); opacity: .55;
+  background: linear-gradient(90deg, transparent, rgba(255, 175, 225, .75), rgba(255, 215, 170, .6), transparent); animation: drift 60s linear infinite; }
+.rs-clouds i:nth-child(1) { top: calc(var(--hz) - 41%); animation-duration: 70s; animation-delay: -12s; }
+.rs-clouds i:nth-child(2) { top: calc(var(--hz) - 33%); width: 46vw; height: 9px; animation-duration: 95s; animation-delay: -55s; opacity: .4; }
+.rs-clouds i:nth-child(3) { top: calc(var(--hz) - 26%); width: 28vw; animation-duration: 55s; animation-delay: -30s; }
+.rs-clouds i:nth-child(4) { top: calc(var(--hz) - 18%); width: 40vw; height: 10px; animation-duration: 80s; animation-delay: -5s; opacity: .5; }
+.rs-clouds i:nth-child(5) { top: calc(var(--hz) - 11%); width: 24vw; height: 5px; animation-duration: 48s; animation-delay: -40s; }
+@keyframes drift { from { transform: translateX(-45vw); } to { transform: translateX(110vw); } }
+
+/* light wave rolling down the grid, horizon heartbeat, rim light on the far mountains, slow CRT sweep */
+.rs-ground::after { content: ""; position: absolute; left: 0; right: 0; top: -32%; height: 32%; pointer-events: none;
+  background: linear-gradient(to bottom, transparent, rgba(var(--a2), .26), rgba(var(--a1), .16), transparent); animation: gridwave 5.5s ease-in infinite; }
+@keyframes gridwave { to { top: 100%; } }
+.rs-horizon { animation: hzpulse 3.2s ease-in-out infinite alternate; }
+@keyframes hzpulse { from { opacity: .72; filter: blur(1.5px) drop-shadow(0 0 10px #ff5fd8); } to { opacity: 1; filter: blur(1px) drop-shadow(0 0 24px #ff7ae6); } }
+.rs-mtn.far path + path { animation: rim 4.5s ease-in-out infinite alternate; }
+@keyframes rim { from { stroke-opacity: .25; } to { stroke-opacity: .8; } }
+.rs-front::after { content: ""; position: absolute; left: 0; right: 0; top: -22vh; height: 22vh; z-index: 3; pointer-events: none;
+  background: linear-gradient(to bottom, transparent, rgba(255, 190, 245, .07), transparent); animation: crt 8s linear infinite; }
+@keyframes crt { to { top: 100%; } }
+
+/* the retro logo gets a faint chromatic shimmer */
+:root[data-theme="retro"] .neon-logo.huge { animation: chroma 6s ease-in-out infinite; }
+@keyframes chroma { 0%, 92%, 100% { filter: none; } 94% { filter: drop-shadow(3px 0 0 rgba(61, 240, 255, .6)) drop-shadow(-3px 0 0 rgba(255, 95, 216, .6)); } 96% { filter: drop-shadow(-2px 0 0 rgba(61, 240, 255, .5)) drop-shadow(2px 0 0 rgba(255, 95, 216, .5)); } }
+.no-flicker .neon-logo.huge { animation: none !important; }

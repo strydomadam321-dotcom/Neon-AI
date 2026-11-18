@@ -677,35 +677,54 @@ els.model.onchange = () => {
 };
 document.querySelectorAll(".chip").forEach((c) => (c.onclick = () => sendMessage(c.querySelector("span").textContent)));
 
+// Settings are drafts: nothing is applied or saved until you press Save.
+const setFields = { retro: $("optRetro"), bg: $("optBg"), flicker: $("optFlicker"), sys: $("sysPrompt") };
+function fillSettings() {
+  setFields.retro.checked = !!settings.retro;
+  setFields.bg.checked = settings.bg !== false;
+  setFields.flicker.checked = settings.flicker !== false;
+  setFields.sys.value = settings.system || "";
+}
+const isDirty = () =>
+  setFields.retro.checked !== !!settings.retro || setFields.bg.checked !== (settings.bg !== false) ||
+  setFields.flicker.checked !== (settings.flicker !== false) || setFields.sys.value.trim() !== (settings.system || "").trim();
+function updateUnsaved() {
+  const bar = $("unsaved"), dirty = isDirty();
+  if (dirty && bar.hidden) { bar.hidden = false; bar.style.animation = "none"; void bar.offsetWidth; bar.style.animation = ""; }
+  else if (!dirty) bar.hidden = true;
+}
 function openSettings() {
-  $("sysPrompt").value = settings.system || "";
-  $("optRetro").checked = !!settings.retro;
-  $("optBg").checked = settings.bg !== false;
-  $("optFlicker").checked = settings.flicker !== false;
+  fillSettings(); updateUnsaved();
   $("settings").classList.remove("hidden");
   $("settings").querySelector(".set-body").scrollTop = 0;
 }
-function closeSettings() { $("settings").classList.add("hidden"); }
-$("settingsBtn").onclick = openSettings;
-$("closeSettings").onclick = closeSettings;
-$("settings").onmousedown = (e) => { if (e.target === $("settings")) closeSettings(); };
-// appearance switches apply instantly and are remembered on your account and on this device
-[["optRetro", "retro"], ["optBg", "bg"], ["optFlicker", "flicker"]].forEach(([id, key]) => {
-  $(id).addEventListener("change", () => { settings[key] = $(id).checked; applyLook(); saveSettingsQuiet(); });
-});
-$("saveSettings").onclick = async () => {
+function closeSettings(force = false) {
+  if (force !== true && isDirty()) {           // refuse to close while there are unsaved changes: shake the warning
+    const bar = $("unsaved"); bar.classList.remove("shake"); void bar.offsetWidth; bar.classList.add("shake"); return;
+  }
+  $("settings").classList.add("hidden"); fillSettings(); updateUnsaved();
+}
+async function saveDraft() {
   try {
-    const sys = $("sysPrompt").value.trim();
-    const r = await api("/api/settings", { method: "PUT", body: settingsPayload(sys) });
-    settings = { ...settings, ...r.settings }; applyLook(); closeSettings(); toast("Settings saved.");
-  } catch (err) { toast(err.message, "err"); }
-};
-$("signOutBtn").onclick = () => { closeSettings(); $("logoutBtn").click(); };
+    const r = await api("/api/settings", { method: "PUT", body: {
+      ...settingsPayload(setFields.sys.value.trim()), retro: setFields.retro.checked, bg: setFields.bg.checked, flicker: setFields.flicker.checked,
+    } });
+    settings = { ...settings, ...r.settings }; applyLook(); updateUnsaved(); return true;
+  } catch (err) { toast(err.message, "err"); return false; }
+}
+$("settingsBtn").onclick = openSettings;
+$("closeSettings").onclick = () => closeSettings();
+$("settings").onmousedown = (e) => { if (e.target === $("settings")) closeSettings(); };
+Object.values(setFields).forEach((el) => el.addEventListener(el === setFields.sys ? "input" : "change", updateUnsaved));
+$("unsavedReset").onclick = () => { fillSettings(); updateUnsaved(); };
+$("unsavedSave").onclick = async () => { if (await saveDraft()) toast("Settings saved."); };
+$("saveSettings").onclick = async () => { if (!isDirty() || (await saveDraft())) closeSettings(true); };
+$("signOutBtn").onclick = () => { closeSettings(true); $("logoutBtn").click(); };
 $("clearAll").onclick = async () => {
   if (!(await dialog({ title: "Delete ALL chats?", message: "This permanently removes every chat on your account, on all devices.", ok: "Delete everything", danger: true }))) return;
   try {
     await api("/api/chats", { method: "DELETE" });
-    chats = []; startNew(); closeSettings(); toast("All chats deleted.");
+    chats = []; startNew(); closeSettings(true); toast("All chats deleted.");
   } catch (err) { toast(err.message, "err"); }
 };
 $("deleteAcct").onclick = async () => {
@@ -728,7 +747,7 @@ $("deleteAcct").onclick = async () => {
     await api("/api/account/delete", { method: "POST", body: { password: pw }, noAuthRedirect: true });
     const name = user.username;
     try { localStorage.removeItem("neon-last-" + name); } catch {}
-    closeSettings(); showAuth(); toast("Your account was deleted.");
+    closeSettings(true); showAuth(); toast("Your account was deleted.");
   } catch (err) { toast(err.message, "err"); }
 };
 $("logoutBtn").onclick = async () => {

@@ -79,6 +79,8 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
     <mask id="sunM"><rect width="400" height="400" fill="#fff"/><rect y="238" width="400" height="5"/><rect y="264" width="400" height="8"/><rect y="294" width="400" height="11"/><rect y="328" width="400" height="14"/><rect y="366" width="400" height="18"/></mask>
   </defs><circle cx="200" cy="200" r="198" fill="url(#sunG)" mask="url(#sunM)"/></svg></div>
 
+  <div class="rs-clouds"><i></i><i></i><i></i><i></i><i></i></div>
+
   <svg class="rs-mtn far" viewBox="0 0 1440 220" preserveAspectRatio="none"><defs>
     <linearGradient id="mtnF" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8c35b8"/><stop offset="1" stop-color="#3b1070"/></linearGradient></defs>
     <path d="M0 220V150l120-40 100 40 120-60 130 70 130-40 160 50 140-70 140 50 140-65 120 50 100-30v135Z" fill="url(#mtnF)"/>
@@ -111,6 +113,7 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
   <div class="rs-dim"></div>
 </div>
 
+<canvas id="fx2" aria-hidden="true"></canvas>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <!-- auth -->
@@ -290,6 +293,13 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
           <button id="deleteAcct" class="btn danger"><svg class="ic"><use href="#i-user"/></svg>Delete account</button>
         </div>
       </section>
+    </div>
+
+    <div class="unsaved" id="unsaved" role="alert" hidden>
+      <svg class="ic warn"><use href="#i-alert"/></svg>
+      <span>Careful, You have unsaved changes!</span>
+      <button type="button" class="btn small" id="unsavedReset">Reset</button>
+      <button type="button" class="btn primary small" id="unsavedSave">Save Changes</button>
     </div>
 
     <div class="set-foot">
