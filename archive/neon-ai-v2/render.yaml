@@ -1,0 +1,26 @@
+databases:
+  - name: neon-ai-db
+    databaseName: neon_ai_db
+    user: neon_ai_db_user
+    plan: free
+    region: oregon
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: neon-ai
+    runtime: node
+    plan: free
+    region: oregon
+    branch: claude/cool-bardeen-pmnjmb
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: neon-ai-db
+          property: connectionString
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SIGNUP_ANSWER
+        sync: false
