@@ -501,8 +501,174 @@ async function shrinkImage(file) {
   return { mediaType: "image/jpeg", data: c.toDataURL("image/jpeg", 0.85).split(",")[1] };
 }
 
+// ---------- Word / PowerPoint: the text is read in your browser and sent like any other text file ----------
+const NS = {
+  w: "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+  a: "http://schemas.openxmlformats.org/drawingml/2006/main",
+  p: "http://schemas.openxmlformats.org/presentationml/2006/main",
+  r: "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+};
+const MAX_DOC_CHARS = 400000;           // about 100k tokens; longer documents are cut off with a note
+let zipLoader = null;
+function loadZip() {
+  if (window.JSZip) return Promise.resolve(window.JSZip);
+  if (!zipLoader) zipLoader = new Promise((res, rej) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+    sc.onload = () => res(window.JSZip);
+    sc.onerror = () => { zipLoader = null; rej(new Error("Couldn't load the document reader. Check your connection and try again.")); };
+    document.head.appendChild(sc);
+  });
+  return zipLoader;
+}
+const parseXml = (str) => {
+  const d = new DOMParser().parseFromString(str, "application/xml");
+  if (d.getElementsByTagName("parsererror").length) throw new Error("This file looks damaged, so I couldn't read it.");
+  return d;
+};
+const kids = (el, ns, name) => [...el.children].filter((c) => c.localName === name && c.namespaceURI === ns);
+const zipText = async (zip, path) => parseXml(await zip.file(path).async("string"));
+
+// text of one paragraph (Word w:p or PowerPoint a:p) in reading order
+function runsText(el) {
+  let out = "";
+  const walk = (n) => {
+    for (const c of n.children) {
+      switch (c.localName) {
+        case "t": out += c.textContent; break;
+        case "tab": out += "\t"; break;
+        case "br": case "cr": out += "\n"; break;
+        case "noBreakHyphen": out += "-"; break;
+        case "pPr": case "rPr": case "endParaRPr": case "delText": case "instrText": case "Fallback": break;   // formatting, deleted text, field codes, duplicate fallbacks
+        default: walk(c);
+      }
+    }
+  };
+  walk(el);
+  return out;
+}
+
+// ----- Word (.docx) -----
+function docxPara(p) {
+  const text = runsText(p).replace(/\s+$/, "");
+  if (!text.trim()) return "";
+  const pPr = kids(p, NS.w, "pPr")[0];
+  let prefix = "";
+  if (pPr) {
+    const style = kids(pPr, NS.w, "pStyle")[0]?.getAttributeNS(NS.w, "val") || "";
+    const h = /^heading\s*(\d)/i.exec(style);
+    if (h) prefix = "#".repeat(Math.min(6, +h[1])) + " ";
+    else if (/^title$/i.test(style)) prefix = "# ";
+    else if (/^list/i.test(style)) prefix = "- ";                         // "List Bullet" / "List Paragraph" styles
+    const num = kids(pPr, NS.w, "numPr")[0];
+    if (num && !prefix) prefix = "  ".repeat(+(kids(num, NS.w, "ilvl")[0]?.getAttributeNS(NS.w, "val") || 0)) + "- ";
+  }
+  return prefix + text;
+}
+const cellText = (tc, ns) => [...tc.getElementsByTagNameNS(ns, "p")].map((p) => runsText(p).trim()).filter(Boolean).join(" ");
+const tableRows = (tbl, ns) => kids(tbl, ns, "tr").map((tr) => kids(tr, ns, "tc").map((tc) => cellText(tc, ns)).join(" | ")).filter((r) => r.replace(/[| ]/g, "")).join("\n");
+function docxBlocks(parent, out) {
+  for (const el of parent.children) {
+    if (el.namespaceURI !== NS.w) continue;
+    if (el.localName === "p") { const t = docxPara(el); if (t) out.push(t); }
+    else if (el.localName === "tbl") { const t = tableRows(el, NS.w); if (t) out.push(t); }
+    else if (["sdt", "sdtContent", "customXml"].includes(el.localName)) docxBlocks(el, out);
+  }
+}
+async function readDocx(zip) {
+  if (!zip.file("word/document.xml")) throw new Error("That doesn't look like a Word document.");
+  const body = (await zipText(zip, "word/document.xml")).getElementsByTagNameNS(NS.w, "body")[0];
+  const out = [];
+  if (body) docxBlocks(body, out);
+  if (zip.file("word/footnotes.xml")) {
+    const notes = [...(await zipText(zip, "word/footnotes.xml")).getElementsByTagNameNS(NS.w, "footnote")]
+      .filter((n) => +n.getAttributeNS(NS.w, "id") > 0)
+      .map((n) => [...n.getElementsByTagNameNS(NS.w, "p")].map((p) => runsText(p).trim()).filter(Boolean).join(" ")).filter(Boolean);
+    if (notes.length) out.push("Footnotes:\n" + notes.map((t, i) => `${i + 1}. ${t}`).join("\n"));
+  }
+  return out.join("\n\n");
+}
+
+// ----- PowerPoint (.pptx) -----
+function aPara(p) {
+  const t = runsText(p).replace(/\s+$/, "");
+  if (!t.trim()) return "";
+  const lvl = +(kids(p, NS.a, "pPr")[0]?.getAttribute("lvl") || 0);
+  return (lvl ? "  ".repeat(lvl) + "- " : "") + t;
+}
+function pptxShapes(parent, out, info) {
+  for (const el of parent.children) {
+    if (el.namespaceURI !== NS.p) continue;
+    const n = el.localName;
+    if (n === "sp") {
+      const type = el.getElementsByTagNameNS(NS.p, "ph")[0]?.getAttribute("type") || "";
+      if (["sldNum", "dt", "ftr", "hdr"].includes(type)) continue;          // slide number, date, footer
+      const lines = [...el.getElementsByTagNameNS(NS.a, "p")].map(aPara).filter(Boolean);
+      if (!lines.length) continue;
+      if ((type === "title" || type === "ctrTitle") && !info.title) info.title = lines.join(" ").replace(/\s+/g, " ").trim();
+      else out.push(lines.join("\n"));
+    } else if (n === "graphicFrame") {
+      const tb = el.getElementsByTagNameNS(NS.a, "tbl")[0];
+      if (tb) { const t = tableRows(tb, NS.a); if (t) out.push(t); }
+    } else if (n === "grpSp") pptxShapes(el, out, info);
+  }
+}
+// slides in presentation order (file names don't follow reordering), falling back to file number
+async function slideFiles(zip) {
+  try {
+    const pres = await zipText(zip, "ppt/presentation.xml"), rels = await zipText(zip, "ppt/_rels/presentation.xml.rels");
+    const map = {};
+    for (const r of rels.getElementsByTagName("Relationship")) map[r.getAttribute("Id")] = r.getAttribute("Target");
+    const ordered = [...pres.getElementsByTagNameNS(NS.p, "sldId")].map((s) => map[s.getAttributeNS(NS.r, "id")]).filter(Boolean)
+      .map((t) => "ppt/" + t.replace(/^\/?(ppt\/)?/, "")).filter((f) => zip.file(f));
+    if (ordered.length) return ordered;
+  } catch {}
+  return Object.keys(zip.files).map((f) => /^ppt\/slides\/slide(\d+)\.xml$/.exec(f)).filter(Boolean).sort((x, y) => x[1] - y[1]).map((m) => m[0]);
+}
+async function readPptx(zip) {
+  const files = await slideFiles(zip);
+  if (!files.length) throw new Error("That doesn't look like a PowerPoint file.");
+  const out = [];
+  for (let i = 0; i < files.length; i++) {
+    const doc = await zipText(zip, files[i]), tree = doc.getElementsByTagNameNS(NS.p, "spTree")[0], body = [], info = { title: "" };
+    if (tree) pptxShapes(tree, body, info);
+    let notes = "";
+    const relPath = files[i].replace(/([^/]+)$/, "_rels/$1.rels");
+    if (zip.file(relPath)) {
+      const rel = [...(await zipText(zip, relPath)).getElementsByTagName("Relationship")].find((r) => /\/notesSlide$/.test(r.getAttribute("Type") || ""));
+      const target = rel && "ppt/" + rel.getAttribute("Target").replace(/^\.\.\//, "").replace(/^\/?(ppt\/)?/, "");
+      if (target && zip.file(target)) {
+        notes = [...(await zipText(zip, target)).getElementsByTagNameNS(NS.p, "sp")]
+          .filter((sp) => sp.getElementsByTagNameNS(NS.p, "ph")[0]?.getAttribute("type") === "body")
+          .map((sp) => [...sp.getElementsByTagNameNS(NS.a, "p")].map(aPara).filter(Boolean).join("\n")).filter(Boolean).join("\n");
+      }
+    }
+    out.push(`## Slide ${i + 1}${info.title ? ": " + info.title : ""}\n` + [body.join("\n"), notes && "Speaker notes: " + notes].filter(Boolean).join("\n"));
+  }
+  return out.join("\n\n");
+}
+
+async function extractOffice(file, kind) {
+  const JSZip = await loadZip();
+  let zip;
+  try { zip = await JSZip.loadAsync(await readAs(file, "readAsArrayBuffer")); }
+  catch { throw new Error(`${file.name} isn't a valid .${kind} file (it may be password-protected or damaged).`); }
+  let text = (kind === "docx" ? await readDocx(zip) : await readPptx(zip)).replace(/ /g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  if (!text) throw new Error(`I couldn't find any readable text in ${file.name}. (Images aren't read.)`);
+  if (text.length > MAX_DOC_CHARS) text = text.slice(0, MAX_DOC_CHARS) + "\n\n[Truncated: the rest of this document is too long to send.]";
+  return text;
+}
+
 async function addFiles(files) {
   for (const f of files) {
+    const ext = (/\.(docx|pptx|doc|ppt)$/i.exec(f.name) || [])[1]?.toLowerCase();
+    if (ext === "doc" || ext === "ppt") { toast(`${f.name}: old .${ext} files can't be read. Save it as .${ext}x and try again.`, "err"); continue; }
+    if (ext === "docx" || ext === "pptx") {
+      if (f.size > 25 * 1024 * 1024) { toast(`${f.name} is over 25 MB`, "err"); continue; }
+      try { pending.push({ kind: "text", name: f.name, content: await extractOffice(f, ext), src: ext }); renderPending(); }
+      catch (e) { toast(e.message || `Could not read ${f.name}`, "err"); }
+      continue;
+    }
     try {
       if (f.type.startsWith("image/")) {
         const r = await shrinkImage(f);

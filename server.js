@@ -425,7 +425,7 @@ function toContent(msg) {
     } else if (a.kind === "pdf") {
       blocks.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: a.data } });
     } else if (a.kind === "text") {
-      blocks.push({ type: "text", text: `<file name="${String(a.name).replace(/"/g, "")}">\n${a.content}\n</file>` });
+      blocks.push({ type: "text", text: `<file name="${String(a.name).replace(/"/g, "")}">\n${String(a.content).slice(0, 600000)}\n</file>` });
     }
   }
   blocks.push({ type: "text", text: msg.text?.trim() ? msg.text : "(see attached files)" });
@@ -481,7 +481,7 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
     for (const a of m.attachments || []) {
       if (a.kind === "image" && IMG_TYPES.includes(a.mediaType)) parts.push({ inlineData: { mimeType: a.mediaType, data: a.data } });
       else if (a.kind === "pdf") parts.push({ inlineData: { mimeType: "application/pdf", data: a.data } });
-      else if (a.kind === "text") parts.push({ text: `<file name="${String(a.name).replace(/"/g, "")}">\n${a.content}\n</file>` });
+      else if (a.kind === "text") parts.push({ text: `<file name="${String(a.name).replace(/"/g, "")}">\n${String(a.content).slice(0, 600000)}\n</file>` });
     }
     parts.push({ text: m.text?.trim() ? m.text : "(see attached files)" });
     return { role: "user", parts };

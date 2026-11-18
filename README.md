@@ -4,6 +4,7 @@ A neon, ChatGPT-style web chat for Claude. Accounts with username + password, ch
 (continue them from any device), streaming replies, image / PDF / code-file uploads.
 
 ## Features
+- Attach images, PDFs, Word (.docx), PowerPoint (.pptx) and text/code files (Word and PowerPoint text is read in the browser)
 - Effort control (Low / Medium / High / Max): sets how much the model thinks before answering, for both Claude and Gemini
 - Claude and Gemini models in one menu
 - Sign up (must answer a security question) / sign in (password 8+ characters), optional "stay signed in for 30 days"
