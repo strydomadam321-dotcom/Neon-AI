@@ -16,9 +16,8 @@ const CLAUDE_MODELS = [
 ];
 // Gemini models (free API key). Override with GEMINI_MODELS="id|Display name,id|Display name"
 const GEMINI_DEFAULTS = [
-  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash · fast", provider: "gemini" },
-  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro · smartest", provider: "gemini" },
-  { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash-Lite · fastest", provider: "gemini" },
+  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash-Lite · fastest", provider: "gemini" },
+  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash · balanced", provider: "gemini" },
 ];
 const GEMINI_MODELS = process.env.GEMINI_MODELS
   ? process.env.GEMINI_MODELS.split(",").map((x) => x.trim()).filter(Boolean).map((x) => {
@@ -401,7 +400,8 @@ const CLAUDE_THINK = [
 // effort -> Gemini thinking config (2.5 models use a token budget, 3.x models use a level)
 function geminiThinking(id, effort) {
   if (/gemini-3/i.test(id)) {
-    const level = [ "low", null, "high", "high" ][effort];
+    // Flash-Lite supports minimal / low / medium / high. Other 3.x models: only use the levels they all share.
+    const level = (/flash-lite/i.test(id) ? ["minimal", "low", "medium", "high"] : ["low", null, "high", "high"])[effort];
     return level ? { thinkingLevel: level } : null;
   }
   const pro = /pro/i.test(id);
