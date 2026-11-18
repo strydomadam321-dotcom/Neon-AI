@@ -28,6 +28,8 @@ const GEMINI_MODELS = process.env.GEMINI_MODELS
 const MODELS = [...CLAUDE_MODELS, ...GEMINI_MODELS];
 const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_BASE = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com";
+// Model used for chat titles (tried first). Override with TITLE_MODEL.
+const TITLE_MODEL = process.env.TITLE_MODEL || "gemini-3.5-flash";
 const DEFAULT_EFFORT = 1; // 0 Low, 1 Medium, 2 High, 3 Max
 const DEFAULT_MODEL = process.env.DEFAULT_MODEL || MODELS[0].id;
 // Signup gate: people must answer this question to create an account (keeps strangers from spending your credits).
@@ -102,7 +104,7 @@ app.use((req, res, next) => {
   });
   next();
 });
-app.use(express.static(path.join(__dirname, "public"), { maxAge: "5m" }));
+app.use(express.static(path.join(__dirname, "public"), { setHeaders: (res) => res.set("Cache-Control", "no-cache") }));
 
 // ---------- helpers ----------
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
@@ -332,14 +334,14 @@ function keywordTitle(text) {
 // Try every available model (cheap/fast first), then fall back to keywords. Never throws.
 async function makeTitle(userText, assistantText) {
   const convo = `User: ${userText.slice(0, 600)}\n\nAssistant: ${String(assistantText).slice(0, 600)}`;
-  const gem = [...GEMINI_MODELS].sort((x, y) => (/lite/i.test(y.id) ? 1 : 0) - (/lite/i.test(x.id) ? 1 : 0));
+  const gem = [{ id: TITLE_MODEL, provider: "gemini" }, ...GEMINI_MODELS.filter((m) => m.id !== TITLE_MODEL)];
   const claude = [...CLAUDE_MODELS].sort((x, y) => (/haiku/i.test(y.id) ? 1 : 0) - (/haiku/i.test(x.id) ? 1 : 0));
   const attempts = [...gem.map((m) => [m, titleViaGemini]), ...claude.slice(0, 2).map((m) => [m, titleViaClaude])];
   const why = [];
   for (const [m, fn] of attempts) {
     try {
       const t = cleanTitle(await fn(m, convo));
-      if (t) return { title: t, via: m.id };
+      if (t) { console.log(`title: "${t}" via ${m.id}`); return { title: t, via: m.id }; }
       if ((fn === titleViaGemini && GEMINI_KEY) || (fn === titleViaClaude && process.env.ANTHROPIC_API_KEY)) why.push(`${m.id}: empty reply`);
     } catch (e) { why.push(`${m.id}: ${e.message}`); }
   }
