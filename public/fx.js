@@ -43,7 +43,7 @@
   const ctx = cv.getContext("2d");
   const cv2 = document.getElementById("fx2"), c2 = cv2 && cv2.getContext("2d");
   let w = 0, h = 0, dpr = 1, pts = [], stars = [], raf = 0;
-  let meteors = [], queue = [], nextMeteor = 0, embers = [], sparks = [], lastT = 0, wasRetro = false;
+  let meteors = [], queue = [], nextMeteor = 0, embers = [], lastT = 0, wasRetro = false;
   const mouse = { x: -9999, y: -9999 };
   const COLORS = ["0,229,255", "255,43,214", "139,92,246"];
 
@@ -92,7 +92,7 @@
     }
   }
 
-  // bright layer on top of the scene: shooting stars, showers, rising sparkles, cursor sparkle trail
+  // bright layer on top of the scene: shooting stars, showers, rising sparkles
   function retroTop(t, dt) {
     if (!c2) return;
     c2.clearRect(0, 0, w, h);
@@ -129,15 +129,6 @@
     }
     c2.shadowBlur = 0;
 
-    // cursor sparkle trail
-    for (let i = sparks.length - 1; i >= 0; i--) {
-      const p = sparks[i]; p.life -= dt * 1.5; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 120 * dt;
-      if (p.life <= 0) { sparks.splice(i, 1); continue; }
-      const L = p.r * 3.2 * p.life;
-      c2.strokeStyle = `rgba(${p.c},${p.life})`; c2.lineWidth = 1.1;
-      c2.beginPath(); c2.moveTo(p.x - L, p.y); c2.lineTo(p.x + L, p.y); c2.moveTo(p.x, p.y - L); c2.lineTo(p.x, p.y + L); c2.stroke();
-      c2.fillStyle = `rgba(255,255,255,${p.life})`; c2.beginPath(); c2.arc(p.x, p.y, p.r * 0.45, 0, 6.283); c2.fill();
-    }
     c2.globalCompositeOperation = "source-over";
   }
 
@@ -183,12 +174,7 @@
   }
 
   addEventListener("resize", resize);
-  addEventListener("pointermove", (e) => {
-    mouse.x = e.clientX; mouse.y = e.clientY;
-    if (document.documentElement.dataset.theme === "retro" && !document.documentElement.classList.contains("no-bg-anim") && sparks.length < 90) {
-      for (let i = 0; i < 2; i++) sparks.push({ x: e.clientX, y: e.clientY, vx: rnd(-50, 50), vy: rnd(-70, 10), r: rnd(1.2, 2.6), life: 1, c: ["255,120,225", "90,235,255", "255,255,255"][Math.floor(Math.random() * 3)] });
-    }
-  }, { passive: true });
+  addEventListener("pointermove", (e) => { mouse.x = e.clientX; mouse.y = e.clientY; }, { passive: true });
   addEventListener("pointerleave", () => { mouse.x = mouse.y = -9999; });
   document.addEventListener("visibilitychange", () => {
     cancelAnimationFrame(raf);
