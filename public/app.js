@@ -35,12 +35,13 @@ function toast(msg, kind = "ok") {
   setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 300); }, kind === "err" ? 5200 : 2600);
 }
 
-function dialog({ title, message = "", input = null, ok = "OK", danger = false }) {
+function dialog({ title, message = "", input = null, ok = "OK", danger = false, password = false, placeholder = "" }) {
   return new Promise((resolve) => {
     const box = $("dialog"), form = $("dlgForm"), inp = $("dlgInput");
     $("dlgTitle").textContent = title;
     $("dlgMsg").textContent = message; $("dlgMsg").hidden = !message;
     inp.hidden = input === null; if (input !== null) inp.value = input;
+    inp.type = password ? "password" : "text"; inp.placeholder = placeholder; inp.autocomplete = password ? "current-password" : "off"; inp.maxLength = password ? 72 : 120;
     const okb = $("dlgOk"); okb.textContent = ok;
     okb.className = "btn " + (danger ? "danger" : "primary");
     box.classList.remove("hidden");
@@ -684,6 +685,29 @@ $("clearAll").onclick = async () => {
   try {
     await api("/api/chats", { method: "DELETE" });
     chats = []; startNew(); closeSettings(); toast("All chats deleted.");
+  } catch (err) { toast(err.message, "err"); }
+};
+$("deleteAcct").onclick = async () => {
+  // warning 1: are you sure?
+  const first = await dialog({
+    title: "Delete your account?",
+    message: "This permanently deletes your account, every chat and all your settings, on every device. You will be signed out and can't get any of it back.",
+    ok: "Continue", danger: true,
+  });
+  if (!first) return;
+  // warning 2: final warning, password required
+  const pw = await dialog({
+    title: "Final warning",
+    message: `Last chance. "${user.username}" and all of its chats will be erased forever. Enter your password to confirm.`,
+    input: "", password: true, placeholder: "Your password", ok: "Delete my account forever", danger: true,
+  });
+  if (pw === null) return;
+  if (!pw) { toast("Enter your password to confirm.", "err"); return; }
+  try {
+    await api("/api/account/delete", { method: "POST", body: { password: pw }, noAuthRedirect: true });
+    const name = user.username;
+    try { localStorage.removeItem("neon-last-" + name); } catch {}
+    closeSettings(); showAuth(); toast("Your account was deleted.");
   } catch (err) { toast(err.message, "err"); }
 };
 $("logoutBtn").onclick = async () => {

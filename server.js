@@ -231,6 +231,19 @@ app.put("/api/settings", requireAuth, small, wrap(async (req, res) => {
   res.json({ settings: s });
 }));
 
+// permanently delete the signed-in account (chats and sessions go with it via ON DELETE CASCADE)
+app.post("/api/account/delete", requireAuth, small, wrap(async (req, res) => {
+  if (limited("delacct:" + req.user.id, 5, 15 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again in a few minutes." });
+  const password = req.body?.password;
+  if (typeof password !== "string" || !password) return res.status(400).json({ error: "Enter your password to confirm." });
+  const { rows } = await q("select pass_hash from users where id = $1", [req.user.id]);
+  if (!rows[0] || !(await bcrypt.compare(password.slice(0, 200), rows[0].pass_hash))) return res.status(403).json({ error: "Wrong password. Your account was not deleted." });
+  await q("delete from users where id = $1", [req.user.id]);
+  res.clearCookie(COOKIE, { path: "/" });
+  console.log("account deleted:", req.user.username);
+  res.json({ ok: true });
+}));
+
 // ---------- chats (stored per account so they follow you across devices) ----------
 const ID_RE = /^[a-z0-9]{6,40}$/;
 const searchText = (messages) => messages.map((m) => (typeof m?.text === "string" ? m.text : "")).join(" \n ").slice(0, 60000).toLowerCase();

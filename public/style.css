@@ -398,7 +398,7 @@ header { position: relative; z-index: 30; display: flex; align-items: center; ga
 .who { display: flex; align-items: center; gap: 10px; font-weight: 500; }
 .card textarea, .dlg-input { width: 100%; padding: 12px 14px; border-radius: 12px; background: rgba(3, 5, 14, .6); border: 1px solid var(--line2); outline: 0; resize: vertical; transition: border-color .2s, box-shadow .2s; }
 .card textarea:focus, .dlg-input:focus { border-color: var(--cyan); box-shadow: var(--glow-c); }
-.row { display: flex; align-items: center; gap: 10px; margin-top: 20px; }
+.row { display: flex; align-items: center; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
 .spacer { flex: 1; }
 .dlg { width: min(420px, 100%); }
 .dlg-msg { color: var(--dim); margin: 8px 0 0; }
