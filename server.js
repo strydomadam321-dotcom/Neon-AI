@@ -285,22 +285,25 @@ function cleanTitle(raw) {
   return t.length > 60 ? t.slice(0, 60).replace(/\s+\S*$/, "") : t;
 }
 
-async function titleViaGemini(convo) {
-  const m = GEMINI_MODELS.find((x) => /lite/i.test(x.id)) || GEMINI_MODELS.find((x) => /flash/i.test(x.id)) || GEMINI_MODELS[0];
+async function titleViaGemini(m, convo) {
   if (!GEMINI_KEY || !m) return "";
-  const gc = { maxOutputTokens: 40, temperature: 0.4 };
+  // thinking tokens count against maxOutputTokens, so leave plenty of room
+  const gc = { maxOutputTokens: 256, temperature: 0.4 };
   const th = geminiThinking(m.id, 0);
-  const body = (withTh) => JSON.stringify({
-    systemInstruction: { parts: [{ text: TITLE_PROMPT }] },
-    contents: [{ role: "user", parts: [{ text: convo }] }],
-    generationConfig: withTh && th ? { ...gc, thinkingConfig: th } : gc,
-  });
   const call = async (withTh) => {
     const r = await fetch(`${GEMINI_BASE}/v1beta/models/${encodeURIComponent(m.id)}:generateContent`, {
-      method: "POST", signal: AbortSignal.timeout(15000),
-      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY }, body: body(withTh),
+      method: "POST", signal: AbortSignal.timeout(20000),
+      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: TITLE_PROMPT }] },
+        contents: [{ role: "user", parts: [{ text: convo }] }],
+        generationConfig: withTh && th ? { ...gc, thinkingConfig: th } : gc,
+      }),
     });
-    if (!r.ok) { const e = new Error("gemini " + r.status); e.status = r.status; throw e; }
+    if (!r.ok) {
+      let msg = ""; try { msg = (await r.json())?.error?.message || ""; } catch {}
+      const e = new Error(`${r.status} ${msg}`.slice(0, 200)); e.status = r.status; throw e;
+    }
     const j = await r.json();
     return (j.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("");
   };
@@ -308,35 +311,77 @@ async function titleViaGemini(convo) {
   catch (e) { if (e.status === 400) return await call(false); throw e; }
 }
 
-async function titleViaClaude(convo) {
+async function titleViaClaude(m, convo) {
   if (!process.env.ANTHROPIC_API_KEY) return "";
-  const m = CLAUDE_MODELS.find((x) => /haiku/i.test(x.id)) || CLAUDE_MODELS[0];
   const r = await client.messages.create({
-    model: m.id, max_tokens: 40, system: TITLE_PROMPT,
+    model: m.id, max_tokens: 60, system: TITLE_PROMPT,
     messages: [{ role: "user", content: convo }],
-  }, { timeout: 15000 });
+  }, { timeout: 20000 });
   return r.content.filter((b) => b.type === "text").map((b) => b.text).join("");
 }
 
+// Last resort when no model can be reached: a few key words from the first message.
+const FILLER = new Set("a an the and or but so to of in on for with at by from is are was were be am can could would should will do does did please pls plz hey hi hello yo i me my you your we our it its this that these those just some any im ive thanks thank u ur".split(" "));
+function keywordTitle(text) {
+  const words = String(text || "").replace(/[^\p{L}\p{N}'\s-]/gu, " ").split(/\s+/).filter(Boolean);
+  const keep = words.filter((w) => !FILLER.has(w.toLowerCase()));
+  if (!keep.length) return "";
+  return keep.slice(0, 5).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ");
+}
+
+// Try every available model (cheap/fast first), then fall back to keywords. Never throws.
+async function makeTitle(userText, assistantText) {
+  const convo = `User: ${userText.slice(0, 600)}\n\nAssistant: ${String(assistantText).slice(0, 600)}`;
+  const gem = [...GEMINI_MODELS].sort((x, y) => (/lite/i.test(y.id) ? 1 : 0) - (/lite/i.test(x.id) ? 1 : 0));
+  const claude = [...CLAUDE_MODELS].sort((x, y) => (/haiku/i.test(y.id) ? 1 : 0) - (/haiku/i.test(x.id) ? 1 : 0));
+  const attempts = [...gem.map((m) => [m, titleViaGemini]), ...claude.slice(0, 2).map((m) => [m, titleViaClaude])];
+  const why = [];
+  for (const [m, fn] of attempts) {
+    try {
+      const t = cleanTitle(await fn(m, convo));
+      if (t) return { title: t, via: m.id };
+      if ((fn === titleViaGemini && GEMINI_KEY) || (fn === titleViaClaude && process.env.ANTHROPIC_API_KEY)) why.push(`${m.id}: empty reply`);
+    } catch (e) { why.push(`${m.id}: ${e.message}`); }
+  }
+  console.warn("title: all models failed ->", why.join(" | "));
+  const k = cleanTitle(keywordTitle(userText));
+  return { title: k || "", via: "keywords", why };
+}
+
+// A chat counts as "untitled" while its title is still just the first message.
+const firstUserText = (u) => (u?.text?.trim() || u?.attachments?.[0]?.name || "");
+
 app.post("/api/chats/:id/title", requireAuth, wrap(async (req, res) => {
-  if (limited("title:" + req.user.id, 30, 60e3)) return res.json({ title: null });
+  if (limited("title:" + req.user.id, 40, 60e3)) return res.json({ title: null });
   const { rows } = await q("select title,messages from chats where user_id=$1 and id=$2", [req.user.id, req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: "Chat not found" });
   const msgs = rows[0].messages || [];
   const u = msgs.find((m) => m.role === "user"), a = msgs.find((m) => m.role === "assistant" && m.text);
   if (!u || !a) return res.json({ title: null });
-  const userText = u.text?.trim() || (u.attachments || []).map((x) => x.name).join(", ");
   // never overwrite a title the user set themselves
-  if (rows[0].title !== fallbackTitle(u.text?.trim() || u.attachments?.[0]?.name || "New chat")) return res.json({ title: null });
-  const convo = `User: ${userText.slice(0, 600)}\n\nAssistant: ${String(a.text).slice(0, 600)}`;
-  let title = "";
-  for (const fn of [titleViaGemini, titleViaClaude]) {
-    try { title = cleanTitle(await fn(convo)); } catch (e) { console.warn("title:", fn.name, e.message); }
-    if (title) break;
+  if (rows[0].title !== fallbackTitle(firstUserText(u) || "New chat")) return res.json({ title: null });
+  const r = await makeTitle(firstUserText(u), a.text);
+  if (!r.title || r.title === rows[0].title) return res.json({ title: null, via: r.via });
+  await q("update chats set title=$1 where user_id=$2 and id=$3 and title=$4", [r.title, req.user.id, req.params.id, rows[0].title]);
+  res.json({ title: r.title, via: r.via });
+}));
+
+// Give titles to older chats that still just show the first message (a few per call).
+app.post("/api/chats-retitle", requireAuth, wrap(async (req, res) => {
+  if (limited("retitle:" + req.user.id, 6, 10 * 60e3)) return res.json({ updated: [] });
+  const { rows } = await q(
+    `select id, title, messages->0->>'role' as r0, messages->0->>'text' as t0, messages->0->'attachments'->0->>'name' as n0,
+            messages->1->>'role' as r1, messages->1->>'text' as t1
+       from chats where user_id=$1 order by updated_at desc limit 60`, [req.user.id]);
+  const todo = rows.filter((c) => c.r0 === "user" && c.r1 === "assistant" && c.t1 && c.title === fallbackTitle((c.t0 || "").trim() || c.n0 || "New chat")).slice(0, 5);
+  const updated = [];
+  for (const c of todo) {
+    const r = await makeTitle((c.t0 || "").trim() || c.n0 || "", c.t1);
+    if (!r.title || r.title === c.title) continue;
+    const u = await q("update chats set title=$1 where user_id=$2 and id=$3 and title=$4", [r.title, req.user.id, c.id, c.title]);
+    if (u.rowCount) updated.push({ id: c.id, title: r.title });
   }
-  if (!title) return res.json({ title: null });
-  await q("update chats set title=$1 where user_id=$2 and id=$3 and title=$4", [title, req.user.id, req.params.id, rows[0].title]);
-  res.json({ title });
+  res.json({ updated });
 }));
 
 app.delete("/api/chats/:id", requireAuth, wrap(async (req, res) => {

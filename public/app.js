@@ -424,6 +424,19 @@ async function streamReply() {
   if (saved && !errMsg && text && chat.messages.length === 2) autoTitle(chat);
 }
 
+// give older chats (still titled with their first message) a short summary title, a few at a time
+async function retitleOld() {
+  try {
+    const r = await api("/api/chats-retitle", { method: "POST", noAuthRedirect: true });
+    if (!r?.updated?.length) return;
+    r.updated.forEach((u) => {
+      const m = chats.find((c) => c.id === u.id); if (m) m.title = u.title;
+      if (current?.id === u.id) { current.title = u.title; els.title.textContent = u.title; }
+    });
+    renderList();
+  } catch {}
+}
+
 // ask the server for a short summary title (a few words) after the first reply
 async function autoTitle(chat) {
   const temp = chat.title;
@@ -722,6 +735,7 @@ async function enterApp(data) {
   const last = ls.get("neon-last-" + user.username);
   if (last && chats.some((c) => c.id === last)) await openChat(last); else startNew();
   renderList();
+  retitleOld();
   clearInterval(syncTimer);
   syncTimer = setInterval(syncNow, 25000);
 }
