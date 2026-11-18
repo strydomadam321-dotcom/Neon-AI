@@ -69,11 +69,19 @@
   const rnd = (a, b) => a + Math.random() * (b - a);
   const hzY = () => h * (w <= 820 ? 0.66 : 0.70);
 
+  let meteorId = 0;
+  // Shooting stars start just off a screen edge and fly through the clear sky (above the mountains)
+  // until they have completely left the screen. They never fade out or end early.
   function spawnMeteor(delay = 0) {
-    const ltr = Math.random() < 0.72, ang = rnd(0.28, 0.62), sp = rnd(520, 1050);
+    const skyMax = hzY() - h * 0.19 - 12;                       // lowest point they may reach: above the mountain tops
+    const ltr = Math.random() < 0.5, len = rnd(110, 280), fromTop = Math.random() < 0.3, sp = rnd(520, 1050);
+    const x0 = fromTop ? rnd(w * 0.05, w * 0.95) : ltr ? -len * 0.1 : w + len * 0.1;
+    const y0 = fromTop ? -16 : rnd(-10, Math.max(40, skyMax * 0.5));
+    const dx = ltr ? w + len * 1.2 - x0 : x0 + len * 1.2;       // distance to travel to be fully off-screen sideways
+    const angMax = Math.atan(Math.max(10, skyMax - y0) / Math.max(200, dx));
+    const ang = rnd(Math.min(0.1, angMax), Math.min(0.55, angMax));
     queue.push({ at: lastT + delay, m: {
-      x: ltr ? rnd(-60, w * 0.75) : rnd(w * 0.25, w + 60), y: rnd(-30, h * 0.34),
-      vx: (ltr ? 1 : -1) * Math.cos(ang) * sp, vy: Math.sin(ang) * sp, len: rnd(110, 280), wd: rnd(1.3, 2.6),
+      id: ++meteorId, x: x0, y: y0, vx: (ltr ? 1 : -1) * Math.cos(ang) * sp, vy: Math.sin(ang) * sp, len, wd: rnd(1.3, 2.6),
       c: Math.random() < 0.6 ? "255,140,225" : "120,240,255", life: 1,
     } });
   }
@@ -114,8 +122,9 @@
       c2.beginPath(); c2.moveTo(m.x, m.y); c2.lineTo(tx, ty); c2.stroke();
       c2.fillStyle = `rgba(255,255,255,${m.life})`; c2.shadowColor = `rgba(${m.c},1)`; c2.shadowBlur = 14;
       c2.beginPath(); c2.arc(m.x, m.y, m.wd * 0.9, 0, 6.283); c2.fill(); c2.shadowBlur = 0;
-      m.x += m.vx * dt; m.y += m.vy * dt; m.life -= dt * 0.28;
-      if (m.life <= 0 || m.x < -300 || m.x > w + 300 || m.y > hz * 0.92) meteors.splice(i, 1);
+      m.x += m.vx * dt; m.y += m.vy * dt;
+      const tailX = m.x - ux * m.len, tailY = m.y - uy * m.len;
+      if ((m.vx > 0 ? tailX > w + 4 : tailX < -4) || tailY > h + 4) meteors.splice(i, 1);
     }
 
     // sparkles rising from the neon grid
@@ -173,6 +182,7 @@
     raf = requestAnimationFrame(frame);
   }
 
+  window.__neonFx = { meteors: () => meteors.map((m) => ({ id: m.id, x: m.x, y: m.y, vx: m.vx, vy: m.vy, len: m.len })), skyMax: () => hzY() - h * 0.19 - 12, size: () => [w, h] };
   addEventListener("resize", resize);
   addEventListener("pointermove", (e) => { mouse.x = e.clientX; mouse.y = e.clientY; }, { passive: true });
   addEventListener("pointerleave", () => { mouse.x = mouse.y = -9999; });
