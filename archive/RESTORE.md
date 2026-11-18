@@ -25,3 +25,9 @@ Render redeploys automatically. Nothing else needs changing:
 The academic one-page site ("Study less often. Remember more.") is saved in `archive/academic-site-v1/public/`.
 To bring it back: `rm -rf public && cp -a archive/academic-site-v1/public public`, then commit and push.
 (`server.js` already serves whatever is in `public/`.)
+
+## Quizlet-style flashcard app
+The simple flashcard app (sets, flashcards, Learn mode, import) is saved in `archive/flashcards-v1/public/`.
+It needs no database. To bring it back: `rm -rf public && cp -a archive/flashcards-v1/public public`, then use the
+tiny static `server.js` from commit `5075860` (`git show 5075860:server.js > server.js`) and `package.json`
+with only `express` (`git show 5075860:package.json > package.json`), then commit and push.

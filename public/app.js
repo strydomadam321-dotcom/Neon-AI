@@ -1,383 +1,725 @@
 "use strict";
-/* Free Study Resources: simple flashcards. Everything is stored in this browser (localStorage). */
+const $ = (id) => document.getElementById(id);
+const els = {
+  list: $("chatList"), msgs: $("messages"), empty: $("empty"), input: $("input"), send: $("send"),
+  model: $("model"), title: $("chatTitle"), atts: $("attachments"), file: $("fileInput"),
+  composer: $("composer"), search: $("search"), sidebar: $("sidebar"), scrim: $("scrim"), toBottom: $("toBottom"),
+  sync: $("syncDot"),
+};
+const icon = (n, cls = "") => `<svg class="ic ${cls}"><use href="#i-${n}"/></svg>`;
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
-const view = document.getElementById("view");
+const ls = {
+  get: (k, d = "") => { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+};
 
-// ---------- tiny DOM helper (user text always goes through textContent) ----------
-function h(tag, props, ...kids) {
-  const el = document.createElement(tag);
-  for (const k in props || {}) {
-    const v = props[k];
-    if (v == null || v === false) continue;
-    if (k === "class") el.className = v;
-    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
-    else if (k === "value") el.value = v;
-    else el.setAttribute(k, v === true ? "" : v);
-  }
-  kids.flat().forEach((c) => { if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(c)); });
-  return el;
+// ---------- state ----------
+let config = { models: [], defaultModel: "", needsInvite: false, hasKey: true, hasGemini: false, defaultEffort: 1 };
+let user = null;
+let settings = { system: "", model: "", effort: 1 };
+let chats = [];          // metadata list for the sidebar: {id,title,model,created,updated}
+let current = null;      // active chat (full object incl. messages)
+let pending = [];        // attachments waiting to be sent
+let busy = false;
+let abortCtl = null;
+let syncTimer = 0;
+
+// ---------- toasts + dialogs ----------
+function toast(msg, kind = "ok") {
+  const t = document.createElement("div");
+  t.className = "toast " + kind;
+  t.innerHTML = icon(kind === "err" ? "alert" : "check");
+  const s = document.createElement("span"); s.textContent = msg; t.appendChild(s);
+  $("toasts").appendChild(t);
+  setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 300); }, kind === "err" ? 5200 : 2600);
 }
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
-let toastT = 0;
-function toast(msg) {
-  const t = document.getElementById("toast");
-  t.textContent = msg; t.hidden = false;
-  clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 2600);
+function dialog({ title, message = "", input = null, ok = "OK", danger = false }) {
+  return new Promise((resolve) => {
+    const box = $("dialog"), form = $("dlgForm"), inp = $("dlgInput");
+    $("dlgTitle").textContent = title;
+    $("dlgMsg").textContent = message; $("dlgMsg").hidden = !message;
+    inp.hidden = input === null; if (input !== null) inp.value = input;
+    const okb = $("dlgOk"); okb.textContent = ok;
+    okb.className = "btn " + (danger ? "danger" : "primary");
+    box.classList.remove("hidden");
+    (input === null ? okb : inp).focus(); if (input !== null) inp.select();
+    const done = (v) => { box.classList.add("hidden"); form.onsubmit = null; $("dlgCancel").onclick = null; box.onmousedown = null; resolve(v); };
+    form.onsubmit = (e) => { e.preventDefault(); done(input === null ? true : inp.value); };
+    $("dlgCancel").onclick = () => done(input === null ? false : null);
+    box.onmousedown = (e) => { if (e.target === box) done(input === null ? false : null); };
+  });
 }
 
-// ---------- storage ----------
-const KEY = "fsr-sets-v1", SEEDED = "fsr-seeded-v1";
-const mk = (title, desc, pairs) => ({ id: uid(), title, desc, sample: true, cards: pairs.map(([t, d]) => ({ id: uid(), t, d, star: false })) });
-const SAMPLES = () => [
-  mk("Spanish basics", "Everyday words and phrases", [
-    ["hola", "hello"], ["adiós", "goodbye"], ["gracias", "thank you"], ["por favor", "please"],
-    ["buenos días", "good morning"], ["buenas noches", "good night"], ["¿cómo estás?", "how are you?"],
-    ["lo siento", "I'm sorry"], ["sí", "yes"], ["agua", "water"], ["comida", "food"], ["amigo", "friend"]]),
-  mk("US state capitals", "Ten states and their capital cities", [
-    ["California", "Sacramento"], ["Texas", "Austin"], ["Florida", "Tallahassee"], ["New York", "Albany"], ["Illinois", "Springfield"],
-    ["Washington", "Olympia"], ["Pennsylvania", "Harrisburg"], ["Ohio", "Columbus"], ["Georgia", "Atlanta"], ["Arizona", "Phoenix"]]),
-  mk("Cell biology", "Organelles and what they do", [
-    ["Nucleus", "Stores DNA and controls cell activity"], ["Mitochondria", "Produces ATP through cellular respiration"],
-    ["Ribosome", "Builds proteins from amino acids"], ["Chloroplast", "Site of photosynthesis in plant cells"],
-    ["Cell membrane", "Controls what enters and leaves the cell"], ["Cell wall", "Rigid outer layer in plant cells"],
-    ["Golgi apparatus", "Modifies, sorts and packages proteins"], ["Endoplasmic reticulum", "Network that makes and transports proteins and lipids"],
-    ["Lysosome", "Contains enzymes that break down waste"], ["Vacuole", "Stores water, nutrients and waste"]]),
-  mk("First ten elements", "Symbol to name", [
-    ["H", "Hydrogen"], ["He", "Helium"], ["Li", "Lithium"], ["Be", "Beryllium"], ["B", "Boron"],
-    ["C", "Carbon"], ["N", "Nitrogen"], ["O", "Oxygen"], ["F", "Fluorine"], ["Ne", "Neon"]]),
-  mk("How to study", "The science of remembering", [
-    ["Testing effect", "Retrieving information from memory strengthens it more than rereading it"],
-    ["Spaced repetition", "Reviewing material at increasing intervals instead of all at once"],
-    ["Leitner system", "Correct cards move to a box reviewed less often; missed cards return to box 1"],
-    ["Hermann Ebbinghaus", "Published the first systematic forgetting-curve experiments in 1885"],
-    ["Good flashcard", "One idea, a clear question and a short answer"],
-    ["Cramming", "Helps for tomorrow, but spaced practice gives better long-term retention"]]),
-];
+// ---------- api ----------
+async function api(path, opts = {}) {
+  const init = { method: opts.method || "GET", headers: {}, credentials: "same-origin", signal: opts.signal };
+  if (opts.body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(opts.body); }
+  const res = await fetch(path, init);
+  let data = null;
+  try { data = await res.json(); } catch {}
+  if (res.status === 401 && !opts.noAuthRedirect) { showAuth("Your session expired. Please sign in again."); }
+  if (!res.ok) { const e = new Error(data?.error || `Request failed (${res.status})`); e.status = res.status; e.field = data?.field; throw e; }
+  return data;
+}
 
-let sets = [];
-function load() {
+// ---------- auth screen ----------
+let mode = "login";
+const authEls = { form: $("authForm"), user: $("username"), pass: $("password"), err: $("authErr"), btn: $("authSubmit") };
+
+function setMode(m) {
+  mode = m;
+  document.querySelector(".tabs").dataset.mode = m;
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.mode === m));
+  authEls.btn.querySelector(".lbl").textContent = m === "login" ? "Sign in" : "Create account";
+  authEls.pass.autocomplete = m === "login" ? "current-password" : "new-password";
+  $("strength").hidden = m !== "signup";
+  $("fInvite").hidden = !(m === "signup" && config.needsInvite);
+  authEls.err.textContent = "";
+  document.querySelectorAll(".field.bad").forEach((f) => f.classList.remove("bad"));
+}
+document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => setMode(t.dataset.mode)));
+
+$("togglePw").onclick = () => {
+  const show = authEls.pass.type === "password";
+  authEls.pass.type = show ? "text" : "password";
+  $("togglePw").innerHTML = icon(show ? "eyeoff" : "eye");
+  $("togglePw").setAttribute("aria-label", show ? "Hide password" : "Show password");
+};
+
+function scorePw(p) {
+  let s = 0;
+  if (p.length >= 8) s++;
+  if (p.length >= 12) s++;
+  if (/[a-z]/.test(p) && /[A-Z]/.test(p)) s++;
+  if (/\d/.test(p) && /[^A-Za-z0-9]/.test(p)) s++;
+  return p.length ? Math.max(1, s) : 0;
+}
+authEls.pass.addEventListener("input", () => {
+  const p = authEls.pass.value, s = scorePw(p);
+  $("strength").dataset.s = p.length < 8 ? Math.min(1, s) : s;
+  $("strengthTxt").textContent = p.length < 8 ? `${p.length}/8 characters minimum` : ["", "Weak", "Okay", "Strong", "Excellent"][s] || "Okay";
+});
+
+function fieldErr(id, msg) {
+  authEls.err.textContent = msg;
+  const f = $(id); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad");
+  f.querySelector("input")?.focus();
+}
+["username", "password", "invite"].forEach((id) => $(id).addEventListener("input", () => { $(id).closest(".field").classList.remove("bad"); authEls.err.textContent = ""; }));
+
+authEls.form.onsubmit = async (e) => {
+  e.preventDefault();
+  const username = authEls.user.value.trim(), password = authEls.pass.value;
+  if (!username) return fieldErr("fUser", "Enter a username.");
+  if (mode === "signup" && !/^[A-Za-z0-9_.-]{3,24}$/.test(username)) return fieldErr("fUser", "Username: 3-24 characters, letters, numbers, . _ -");
+  if (!password) return fieldErr("fPass", "Enter your password.");
+  if (mode === "signup" && password.length < 8) return fieldErr("fPass", "Password must be at least 8 characters.");
+  if (mode === "signup" && !$("invite").value.trim()) return fieldErr("fInvite", "Answer the question to create an account.");
+  authEls.btn.classList.add("loading"); authEls.btn.disabled = true;
   try {
-    sets = JSON.parse(localStorage.getItem(KEY)) || [];
-    if (!localStorage.getItem(SEEDED)) { if (!sets.length) sets = SAMPLES(); localStorage.setItem(SEEDED, "1"); save(); }
-  } catch { sets = SAMPLES(); }
-}
-function save() { try { localStorage.setItem(KEY, JSON.stringify(sets)); } catch { toast("Could not save. Browser storage may be full or blocked."); } }
-const getSet = (id) => sets.find((s) => s.id === id);
-
-// ---------- router ----------
-function route() {
-  const [, page, id] = (location.hash || "#/").split("/");
-  document.removeEventListener("keydown", keyHandler);
-  keyHandler = null;
-  view.replaceChildren();
-  window.scrollTo(0, 0);
-  if (page === "set" && getSet(id)) renderSet(getSet(id));
-  else if (page === "new") renderEdit(null);
-  else if (page === "edit" && getSet(id)) renderEdit(getSet(id));
-  else renderHome();
-  document.title = (page === "set" && getSet(id) ? getSet(id).title + " · " : "") + "Free Study Resources · Flashcards";
-}
-addEventListener("hashchange", route);
-let keyHandler = null;
-function bindKeys(fn) { keyHandler = fn; document.addEventListener("keydown", fn); }
-
-// ---------- home ----------
-function renderHome() {
-  view.append(h("div", { class: "page-head" },
-    h("h1", {}, "Your sets"),
-    h("a", { class: "btn primary", href: "#/new" }, "Create a set")));
-
-  if (!sets.length) {
-    view.append(h("div", { class: "empty" },
-      h("h3", {}, "No sets yet"),
-      h("p", {}, "Create your first set, or load the sample sets to try things out."),
-      h("a", { class: "btn primary", href: "#/new" }, "Create a set"),
-      " ",
-      h("button", { class: "btn", type: "button", onclick: restoreSamples }, "Load sample sets")));
-    return;
+    const data = await api(mode === "login" ? "/api/login" : "/api/signup", {
+      method: "POST", noAuthRedirect: true,
+      body: { username, password, remember: $("remember").checked, answer: $("invite").value },
+    });
+    authEls.pass.value = ""; $("invite").value = "";
+    await enterApp(data);
+    if (mode === "signup") toast("Account created. Welcome aboard.");
+  } catch (err) {
+    const map = { username: "fUser", password: "fPass", answer: "fInvite" };
+    if (map[err.field]) fieldErr(map[err.field], err.message);
+    else { authEls.err.textContent = err.message; if (err.status === 401) { const f = $("fPass"); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad"); } }
+  } finally {
+    authEls.btn.classList.remove("loading"); authEls.btn.disabled = false;
   }
-  const grid = h("div", { class: "sets" });
-  sets.forEach((s) => grid.append(
-    h("a", { class: "set", href: "#/set/" + s.id },
-      h("span", { class: "pill" }, plural(s.cards.length, "term")),
-      h("h3", {}, s.title),
-      h("p", {}, s.desc || "No description"))));
-  view.append(grid);
-  view.append(h("p", { class: "fc-hint", style: "margin-top:26px" }, h("button", { class: "link", type: "button", onclick: restoreSamples }, "Add the sample sets again")));
-}
-function restoreSamples() { sets = sets.concat(SAMPLES()); save(); toast("Sample sets added"); route(); }
+};
 
-// ---------- set page ----------
-function renderSet(set) {
-  const area = h("div");
-  const listBox = h("div");
-  let mode = "cards";
-  let redraw = () => {};
-  const tabs = h("div", { class: "tabs", role: "tablist" });
-
-  function setMode(m) {
-    mode = m;
-    tabs.replaceChildren(
-      ...[["cards", "Flashcards"], ["learn", "Learn"]].map(([k, label]) =>
-        h("button", { class: "tab" + (mode === k ? " on" : ""), type: "button", role: "tab", "aria-selected": String(mode === k), onclick: () => setMode(k) }, label)));
-    document.removeEventListener("keydown", keyHandler);
-    keyHandler = null;
-    redraw = (mode === "cards" ? flashcards : learn)(set, area, drawList);
-  }
-  function drawList() {
-    listBox.replaceChildren(
-      h("h2", { class: "list-title" }, `Terms in this set (${set.cards.length})`),
-      h("div", { class: "terms" }, set.cards.map((c) =>
-        h("div", { class: "term-row" },
-          h("div", { class: "t" }, c.t), h("div", { class: "d" }, c.d),
-          h("button", { class: "star" + (c.star ? " on" : ""), type: "button", "aria-pressed": String(!!c.star), "aria-label": (c.star ? "Unstar " : "Star ") + c.t,
-            onclick: () => { c.star = !c.star; save(); drawList(); redraw(); } }, c.star ? "Starred" : "Star")))));
-  }
-
-  view.append(
-    h("div", { class: "crumbs" }, h("a", { href: "#/" }, "← Your sets")),
-    h("div", { class: "set-head" },
-      h("div", { class: "page-head", style: "margin:0" },
-        h("h1", {}, set.title),
-        h("a", { class: "btn", href: "#/edit/" + set.id }, "Edit set")),
-      set.desc ? h("p", {}, set.desc) : null),
-    tabs, area, listBox);
-  setMode("cards");
-  drawList();
+function showAuth(msg = "") {
+  clearInterval(syncTimer);
+  if (busy) abortCtl?.abort();
+  user = null; current = null; chats = [];
+  $("app").classList.add("hidden");
+  $("auth").classList.remove("hidden");
+  setMode("login");
+  authEls.err.textContent = msg;
+  authEls.user.focus();
 }
 
-// ---------- flashcards ----------
-function flashcards(set, area, onChange) {
-  const st = { ids: [], i: 0, flip: false, defFirst: false, starred: false, shuffled: false, know: new Set(), learn: new Set(), done: false };
-
-  function pool(ids) {
-    let list = ids || set.cards.filter((c) => !st.starred || c.star).map((c) => c.id);
-    return st.shuffled ? shuffle(list) : list;
-  }
-  function restart(ids) { st.ids = pool(ids); st.i = 0; st.flip = false; st.done = false; st.know.clear(); st.learn.clear(); draw(); }
-  const cur = () => set.cards.find((c) => c.id === st.ids[st.i]);
-
-  function go(d) { const n = st.i + d; if (n < 0 || n >= st.ids.length) return; st.i = n; st.flip = false; draw(true); }
-  function flipCard() { st.flip = !st.flip; const b = area.querySelector(".fcard"); if (b) { b.classList.toggle("flip", st.flip); b.setAttribute("aria-label", st.flip ? "Showing the back. Press to flip." : "Showing the front. Press to flip."); } }
-  function rate(known) {
-    const c = cur(); if (!c) return;
-    (known ? st.know : st.learn).add(c.id); (known ? st.learn : st.know).delete(c.id);
-    if (st.i >= st.ids.length - 1) { st.done = true; draw(); } else go(1);
-  }
-
-  function chip(label, on, fn) { return h("button", { class: "chip" + (on ? " on" : ""), type: "button", "aria-pressed": String(on), onclick: fn }, label); }
-
-  function draw(focusCard) {
-    area.replaceChildren();
-    const c = cur();
-    const controls = h("div", { class: "fc-top" },
-      h("div", { class: "grp" },
-        chip("Shuffle", st.shuffled, () => { st.shuffled = !st.shuffled; restart(); }),
-        chip("Starred only", st.starred, () => { st.starred = !st.starred; restart(); }),
-        chip("Definition first", st.defFirst, () => { st.defFirst = !st.defFirst; st.flip = false; draw(); })),
-      h("span", {}, plural(set.cards.length, "term")));
-
-    if (!st.ids.length) {
-      area.append(h("div", { class: "fc-wrap" }, controls,
-        h("div", { class: "empty" }, h("h3", {}, st.starred ? "No starred terms yet" : "This set has no terms"),
-          h("p", {}, st.starred ? "Star terms in the list below, then study just those." : "Edit the set to add some terms."))));
-      return;
-    }
-    if (st.done) {
-      const again = st.learn.size;
-      area.append(h("div", { class: "fc-wrap" }, controls,
-        h("div", { class: "done" },
-          h("h2", {}, again ? "Nice work. Keep going." : "You know them all!"),
-          h("p", {}, again ? "Review the ones you are still learning, then try the full set again." : "Every card was marked as known."),
-          h("div", { class: "stats" },
-            h("div", { class: "stat g" }, h("b", {}, st.know.size), "Know"),
-            h("div", { class: "stat o" }, h("b", {}, st.learn.size), "Still learning")),
-          h("div", { class: "row" },
-            again ? h("button", { class: "btn primary", type: "button", onclick: () => restart([...st.learn]) }, `Review ${again} still learning`) : null,
-            h("button", { class: again ? "btn" : "btn primary", type: "button", onclick: () => restart() }, "Restart")))));
-      return;
-    }
-    const front = st.defFirst ? c.d : c.t, back = st.defFirst ? c.t : c.d;
-    const card = h("button", { class: "fcard" + (st.flip ? " flip" : ""), type: "button", "aria-label": "Showing the front. Press to flip.", onclick: flipCard },
-      h("span", { class: "face front" }, h("span", { class: "lbl" }, st.defFirst ? "Definition" : "Term"), front),
-      h("span", { class: "face back" }, h("span", { class: "lbl" }, st.defFirst ? "Term" : "Definition"), back));
-    const star = h("button", { class: "star" + (c.star ? " on" : ""), type: "button", "aria-pressed": String(!!c.star), onclick: () => { c.star = !c.star; save(); onChange(); draw(true); } }, c.star ? "Starred" : "Star");
-
-    area.append(h("div", { class: "fc-wrap" },
-      controls,
-      h("div", { class: "bar", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": st.ids.length, "aria-valuenow": st.i + 1 }, h("i", { style: `width:${((st.i + 1) / st.ids.length) * 100}%` })),
-      h("div", { class: "scene-box" }, star, h("div", { class: "scene" }, card)),
-      h("p", { class: "fc-hint" }, "Click the card or press Space to flip. Use the arrow keys to move."),
-      h("div", { class: "rate" },
-        h("button", { class: "btn learning", type: "button", onclick: () => rate(false) }, "Still learning"),
-        h("button", { class: "btn know", type: "button", onclick: () => rate(true) }, "Know it")),
-      h("div", { class: "fc-ctrl" },
-        h("button", { class: "round", type: "button", "aria-label": "Previous card", disabled: st.i === 0, onclick: () => go(-1) }, "←"),
-        h("span", { class: "count" }, `${st.i + 1} / ${st.ids.length}`),
-        h("button", { class: "round", type: "button", "aria-label": "Next card", disabled: st.i >= st.ids.length - 1, onclick: () => go(1) }, "→")),
-      h("div", { class: "tally" }, h("span", { class: "l" }, `Still learning: ${st.learn.size}`), h("span", { class: "k" }, `Know: ${st.know.size}`))));
-    if (focusCard) area.querySelector(".fcard").focus({ preventScroll: true });
-  }
-
-  bindKeys((e) => {
-    if (e.target.closest("input, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.key === "ArrowRight") { e.preventDefault(); go(1); }
-    else if (e.key === "ArrowLeft") { e.preventDefault(); go(-1); }
-    else if ((e.key === " " || e.key === "ArrowUp" || e.key === "ArrowDown") && !e.target.closest("button, a")) { e.preventDefault(); flipCard(); }
+// ---------- markdown ----------
+marked.setOptions({ breaks: true, gfm: true });
+function md(text) {
+  const html = DOMPurify.sanitize(marked.parse(text || ""));
+  const d = document.createElement("div");
+  d.className = "md";
+  d.innerHTML = html;
+  d.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+  d.querySelectorAll("pre").forEach((pre) => {
+    const code = pre.querySelector("code");
+    if (code && window.hljs) { try { hljs.highlightElement(code); } catch {} }
+    const lang = (code?.className.match(/language-([\w+#-]+)/) || [])[1] || "code";
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    bar.innerHTML = `<span></span><button class="copy" type="button">${icon("copy")}<span>Copy</span></button>`;
+    bar.firstChild.textContent = lang;
+    const b = bar.querySelector("button");
+    b.onclick = () => {
+      navigator.clipboard.writeText(code ? code.innerText : pre.innerText);
+      b.innerHTML = `${icon("check")}<span>Copied</span>`;
+      setTimeout(() => (b.innerHTML = `${icon("copy")}<span>Copy</span>`), 1400);
+    };
+    pre.appendChild(bar);
   });
-  restart();
-  return () => draw();
+  return d;
 }
 
-// ---------- learn (multiple choice) ----------
-function learn(set, area) {
-  area.replaceChildren();
-  if (set.cards.length < 2) {
-    area.append(h("div", { class: "fc-wrap" }, h("div", { class: "empty" }, h("h3", {}, "Add at least 2 terms"), h("p", {}, "Learn mode needs a few terms to build answer choices."),
-      h("a", { class: "btn primary", href: "#/edit/" + set.id }, "Edit set"))));
-    return () => {};
-  }
-  const N = set.cards.length;
-  const st = { queue: [], right: new Set(), missed: new Set(), picked: null, opts: [] };
+// ---------- sidebar ----------
+function groupLabel(ts) {
+  const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+  const day = 864e5, t = d0.getTime();
+  if (ts >= t) return "Today";
+  if (ts >= t - day) return "Yesterday";
+  if (ts >= t - 7 * day) return "Previous 7 days";
+  if (ts >= t - 30 * day) return "Previous 30 days";
+  return "Older";
+}
 
-  function start() { st.queue = shuffle(set.cards.map((c) => c.id)); st.right.clear(); st.missed.clear(); st.picked = null; ask(); }
-  function ask() {
-    const c = set.cards.find((x) => x.id === st.queue[0]);
-    if (!c) return draw();
-    const others = shuffle(set.cards.filter((x) => x.id !== c.id && x.d !== c.d)).map((x) => x.d);
-    const uniq = [...new Set(others)].slice(0, 3);
-    st.opts = shuffle([c.d, ...uniq]); st.picked = null; draw();
+function renderList() {
+  els.list.innerHTML = "";
+  const items = [...chats].sort((a, b) => b.updated - a.updated);
+  if (!items.length) {
+    const e = document.createElement("div");
+    e.className = "list-empty";
+    e.textContent = els.search.value.trim() ? "No chats match your search." : "No chats yet. Start one!";
+    els.list.appendChild(e); return;
   }
-  function pick(text) {
-    if (st.picked !== null) return;
-    const c = set.cards.find((x) => x.id === st.queue[0]);
-    st.picked = text;
-    st.queue.shift();
-    if (text === c.d) st.right.add(c.id); else { st.missed.add(c.id); st.queue.push(c.id); }
-    draw();
-  }
-  function next() { if (st.picked === null) return; st.picked = null; ask(); }
-
-  function draw() {
-    area.replaceChildren();
-    if (!st.queue.length && st.picked === null) {
-      const firstTry = N - st.missed.size;
-      area.append(h("div", { class: "fc-wrap" }, h("div", { class: "done" },
-        h("h2", {}, "Round complete"),
-        h("p", {}, "Every term answered correctly. Words you missed came back until you got them."),
-        h("div", { class: "stats" },
-          h("div", { class: "stat g" }, h("b", {}, `${firstTry}/${N}`), "Right first try"),
-          h("div", { class: "stat o" }, h("b", {}, st.missed.size), "Needed another go")),
-        h("button", { class: "btn primary", type: "button", onclick: start }, "Go again"))));
-      return;
-    }
-    // while feedback is showing, the answered card has already left the queue; remember it
-    const cid = st.picked !== null ? st.last : st.queue[0];
-    const c = set.cards.find((x) => x.id === cid);
-    st.last = c.id;
-    const answered = st.picked !== null;
-    const isRight = answered && st.picked === c.d;
-    const remaining = new Set(st.queue).size;
-    const pct = (st.right.size / N) * 100;
-    area.append(h("div", { class: "fc-wrap" },
-      h("div", { class: "fc-top" }, h("span", {}, `${st.right.size} of ${N} learned`), h("span", {}, remaining ? `${remaining} to go` : "")),
-      h("div", { class: "bar" }, h("i", { style: `width:${pct}%` })),
-      h("div", { class: "q" },
-        h("div", { class: "lbl" }, "Term"),
-        h("div", { class: "term" }, c.t),
-        h("div", { class: "lbl" }, "Choose the matching definition"),
-        h("div", { class: "opts" }, st.opts.map((o, i) =>
-          h("button", { class: "opt" + (answered ? (o === c.d ? " right" : o === st.picked ? " wrong" : "") : ""), type: "button", disabled: answered, onclick: () => pick(o) },
-            h("span", { style: "color:#646f90;font-weight:700;margin-right:8px" }, i + 1 + "."), o))),
-        answered ? h("div", { class: "feedback" },
-          h("span", { class: isRight ? "ok" : "no" }, isRight ? "Correct!" : "Not quite. The answer is highlighted."),
-          h("button", { class: "btn primary", type: "button", onclick: next }, "Continue")) : null)));
-    const cont = area.querySelector(".feedback .btn"); if (cont) cont.focus({ preventScroll: true });
-  }
-
-  bindKeys((e) => {
-    if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest("input, textarea")) return;
-    if (st.picked !== null) { if (e.key === "Enter" && !e.target.closest("button")) next(); return; }
-    const n = Number(e.key);
-    if (n >= 1 && n <= st.opts.length) pick(st.opts[n - 1]);
+  let last = "", i = 0;
+  items.forEach((c) => {
+    const g = groupLabel(c.updated);
+    if (g !== last) { last = g; const h = document.createElement("div"); h.className = "group"; h.textContent = g; els.list.appendChild(h); }
+    const d = document.createElement("div");
+    d.className = "chat-item" + (current && c.id === current.id ? " active" : "");
+    d.style.animationDelay = Math.min(i++, 12) * 25 + "ms";
+    d.tabIndex = 0;
+    d.innerHTML = `<span class="t"></span><span class="acts"><button class="ren" type="button" aria-label="Rename" title="Rename">${icon("pencil")}</button><button class="del" type="button" aria-label="Delete" title="Delete">${icon("trash")}</button></span>`;
+    d.querySelector(".t").textContent = c.title;
+    d.onclick = () => { openChat(c.id); closeSide(); };
+    d.onkeydown = (e) => { if (e.key === "Enter" && e.target === d) { openChat(c.id); closeSide(); } };
+    d.querySelector(".ren").onclick = async (e) => {
+      e.stopPropagation();
+      const t = await dialog({ title: "Rename chat", input: c.title, ok: "Save" });
+      if (t && t.trim()) {
+        try {
+          await api(`/api/chats/${c.id}`, { method: "PATCH", body: { title: t.trim() } });
+          c.title = t.trim().slice(0, 120);
+          if (current?.id === c.id) { current.title = c.title; els.title.textContent = c.title; }
+          renderList();
+        } catch (err) { toast(err.message, "err"); }
+      }
+    };
+    d.querySelector(".del").onclick = async (e) => {
+      e.stopPropagation();
+      if (!(await dialog({ title: "Delete this chat?", message: "This removes it from all your devices.", ok: "Delete", danger: true }))) return;
+      try {
+        await api(`/api/chats/${c.id}`, { method: "DELETE" });
+        chats = chats.filter((x) => x.id !== c.id);
+        if (current?.id === c.id) startNew();
+        renderList();
+      } catch (err) { toast(err.message, "err"); }
+    };
+    els.list.appendChild(d);
   });
-  start();
-  return () => {};
 }
 
-// ---------- create / edit ----------
-function renderEdit(existing) {
-  const draft = existing
-    ? { title: existing.title, desc: existing.desc || "", cards: existing.cards.map((c) => ({ ...c })) }
-    : { title: "", desc: "", cards: [0, 1, 2].map(() => ({ id: uid(), t: "", d: "", star: false })) };
-  const rowsBox = h("div", { class: "rows" });
-  const err = h("div", { class: "err", role: "alert" });
-
-  function drawRows(focusLast) {
-    rowsBox.replaceChildren(...draft.cards.map((c, i) =>
-      h("div", { class: "row" },
-        h("div", { class: "row-head" }, h("span", {}, String(i + 1)),
-          h("button", { class: "rm", type: "button", onclick: () => { draft.cards.splice(i, 1); drawRows(); } }, "Remove")),
-        h("div", { class: "row-body" },
-          h("div", {}, h("textarea", { class: "inp", rows: 2, "aria-label": `Term ${i + 1}`, value: c.t, oninput: (e) => (c.t = e.target.value) }), h("small", {}, "Term")),
-          h("div", {}, h("textarea", { class: "inp", rows: 2, "aria-label": `Definition ${i + 1}`, value: c.d, oninput: (e) => (c.d = e.target.value) }), h("small", {}, "Definition"))))));
-    if (focusLast) rowsBox.lastElementChild?.querySelector("textarea")?.focus();
-  }
-  function addRow() { draft.cards.push({ id: uid(), t: "", d: "", star: false }); drawRows(true); }
-
-  const importBox = h("textarea", { class: "inp", rows: 5, placeholder: "hello, hola\ngoodbye, adiós\n(one per line: term, definition, or separated by a tab)" });
-  function doImport() {
-    const added = importBox.value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => {
-      const k = l.includes("\t") ? l.indexOf("\t") : l.indexOf(",");
-      return k < 0 ? null : { id: uid(), t: l.slice(0, k).trim(), d: l.slice(k + 1).trim(), star: false };
-    }).filter((c) => c && c.t && c.d);
-    if (!added.length) { toast("Nothing to import. Use one line per card: term, definition"); return; }
-    draft.cards = draft.cards.filter((c) => c.t.trim() || c.d.trim()).concat(added);
-    importBox.value = ""; drawRows(); toast(`Added ${plural(added.length, "card")}`);
-  }
-
-  function saveSet() {
-    const title = draft.title.trim();
-    const cards = draft.cards.map((c) => ({ ...c, t: c.t.trim(), d: c.d.trim() })).filter((c) => c.t && c.d);
-    if (!title) { err.textContent = "Give your set a title."; return; }
-    if (cards.length < 2) { err.textContent = "Add at least two cards with both a term and a definition."; return; }
-    const desc = draft.desc.trim();
-    if (existing) { existing.title = title; existing.desc = desc; existing.cards = cards; delete existing.sample; }
-    const made = existing || { id: uid(), title, desc, cards };
-    if (!existing) sets.unshift(made);
-    save();
-    const id = made.id;
-    toast("Saved");
-    location.hash = "#/set/" + id;
-  }
-
-  view.append(h("div", { class: "editor" },
-    h("div", { class: "crumbs" }, h("a", { href: existing ? "#/set/" + existing.id : "#/" }, "← Back")),
-    h("div", { class: "page-head" }, h("h1", {}, existing ? "Edit set" : "Create a new set")),
-    h("div", { class: "field" }, h("label", { for: "f-title" }, "Title"),
-      h("input", { class: "inp", id: "f-title", maxlength: 80, placeholder: "e.g. Biology chapter 3", value: draft.title, oninput: (e) => (draft.title = e.target.value) })),
-    h("div", { class: "field" }, h("label", { for: "f-desc" }, "Description (optional)"),
-      h("input", { class: "inp", id: "f-desc", maxlength: 160, placeholder: "Add a short description", value: draft.desc, oninput: (e) => (draft.desc = e.target.value) })),
-    h("details", { class: "field" },
-      h("summary", { style: "cursor:pointer;font-weight:600;color:#4255ff" }, "Import from text"),
-      h("div", { style: "margin-top:10px" }, importBox, h("button", { class: "btn small", type: "button", style: "margin-top:10px", onclick: doImport }, "Add these cards"))),
-    rowsBox,
-    h("button", { class: "add-row", type: "button", onclick: addRow }, "+ Add card"),
-    err,
-    h("div", { class: "actions" },
-      h("button", { class: "btn primary", type: "button", onclick: saveSet }, existing ? "Save changes" : "Create set"),
-      h("a", { class: "btn", href: existing ? "#/set/" + existing.id : "#/" }, "Cancel"),
-      h("span", { class: "spacer" }),
-      existing ? h("button", { class: "btn danger", type: "button", onclick: () => {
-        if (!confirm(`Delete "${existing.title}"? This can't be undone.`)) return;
-        sets = sets.filter((s) => s !== existing); save(); toast("Set deleted"); location.hash = "#/";
-      } }, "Delete set") : null)));
-  drawRows();
-  if (!existing) document.getElementById("f-title").focus();
+function upsertMeta(chat) {
+  const m = { id: chat.id, title: chat.title, model: chat.model, created: chat.created, updated: chat.updated };
+  const i = chats.findIndex((c) => c.id === chat.id);
+  if (i >= 0) chats[i] = m; else chats.push(m);
 }
 
-load();
-route();
+// ---------- messages ----------
+function attachmentsView(atts) {
+  const wrap = document.createElement("div");
+  wrap.className = "thumbs";
+  (atts || []).forEach((a) => {
+    if (a.kind === "image") {
+      const img = document.createElement("img");
+      img.src = `data:${a.mediaType};base64,${a.data}`; img.alt = a.name;
+      wrap.appendChild(img);
+    } else {
+      const c = document.createElement("div");
+      c.className = "file-chip";
+      c.innerHTML = `${icon("file")}<span class="n"></span>`;
+      c.querySelector(".n").textContent = a.name;
+      wrap.appendChild(c);
+    }
+  });
+  return wrap;
+}
+
+function errBlock(text) {
+  const e = document.createElement("div");
+  e.className = "msg-err";
+  e.innerHTML = icon("alert") + "<span></span>";
+  e.querySelector("span").textContent = text;
+  return e;
+}
+
+function msgEl(m, idx, chat = current) {
+  const row = document.createElement("div");
+  row.className = "msg " + m.role;
+  const av = document.createElement("div");
+  av.className = "avatar";
+  if (m.role === "user") av.textContent = (user?.username || "U")[0]; else av.innerHTML = icon("bolt");
+  const body = document.createElement("div");
+  body.className = "body";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  if (m.role === "user") {
+    if (m.attachments?.length) body.appendChild(attachmentsView(m.attachments));
+    if (m.text) bubble.textContent = m.text; else bubble.style.display = "none";
+    body.appendChild(bubble);
+  } else {
+    if (m.text) bubble.appendChild(md(m.text));
+    body.appendChild(bubble);
+    if (m.err) body.appendChild(errBlock(m.err));
+    const act = document.createElement("div");
+    act.className = "actions";
+    if (m.text) {
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.innerHTML = `${icon("copy")}<span>Copy</span>`;
+      copy.onclick = () => { navigator.clipboard.writeText(m.text); copy.innerHTML = `${icon("check")}<span>Copied</span>`; setTimeout(() => (copy.innerHTML = `${icon("copy")}<span>Copy</span>`), 1400); };
+      act.appendChild(copy);
+    }
+    if (idx === chat.messages.length - 1) {
+      const re = document.createElement("button");
+      re.type = "button";
+      re.innerHTML = `${icon("refresh")}<span>Regenerate</span>`;
+      re.onclick = regenerate;
+      act.appendChild(re);
+    }
+    body.appendChild(act);
+  }
+  row.append(av, body);
+  return row;
+}
+
+function renderMessages() {
+  els.msgs.querySelectorAll(".msg").forEach((n) => n.remove());
+  els.empty.style.display = current.messages.length ? "none" : "";
+  current.messages.forEach((m, i) => els.msgs.appendChild(msgEl(m, i)));
+  els.title.textContent = current.title;
+  scrollDown(true);
+}
+
+function scrollDown(force) {
+  const m = els.msgs;
+  if (force || m.scrollHeight - m.scrollTop - m.clientHeight < 160) { m.style.scrollBehavior = "auto"; m.scrollTop = m.scrollHeight; m.style.scrollBehavior = ""; }
+}
+els.msgs.addEventListener("scroll", () => {
+  const m = els.msgs;
+  els.toBottom.classList.toggle("show", m.scrollHeight - m.scrollTop - m.clientHeight > 300);
+}, { passive: true });
+els.toBottom.onclick = () => els.msgs.scrollTo({ top: els.msgs.scrollHeight, behavior: "smooth" });
+
+function setBusy(b) {
+  busy = b;
+  els.send.innerHTML = icon(b ? "stop" : "send");
+  els.send.classList.toggle("stop", b);
+  els.send.setAttribute("aria-label", b ? "Stop" : "Send");
+}
+function setSync(state) { els.sync.className = "sync" + (state ? " " + state : ""); els.sync.title = state === "busy" ? "Saving" : state === "err" ? "Not saved" : "Synced"; }
+
+// ---------- chat actions ----------
+async function openChat(id) {
+  if (busy) abortCtl?.abort();
+  if (current?.id === id) return;
+  try {
+    const { chat } = await api(`/api/chats/${id}`);
+    current = chat;
+  } catch (err) { toast(err.message, "err"); return; }
+  if (current.model && [...els.model.options].some((o) => o.value === current.model)) { els.model.value = current.model; syncModelUI(); }
+  pending = []; renderPending(); renderMessages(); renderList();
+  ls.set("neon-last-" + user.username, id);
+}
+
+function startNew() {
+  if (busy) abortCtl?.abort();
+  const model = els.model.value;
+  current = { id: uid(), title: "New chat", created: Date.now(), updated: Date.now(), model, messages: [] };
+  pending = []; renderPending(); renderMessages(); renderList();
+  els.input.focus();
+}
+
+async function persist(chat) {
+  setSync("busy");
+  try {
+    const r = await api(`/api/chats/${chat.id}`, { method: "PUT", body: { title: chat.title, model: chat.model, messages: chat.messages, created: chat.created } });
+    chat.updated = r.updated;
+    upsertMeta(chat); renderList(); setSync("");
+    return true;
+  } catch (err) {
+    setSync("err"); toast("Couldn't save this chat: " + err.message, "err");
+    return false;
+  }
+}
+
+async function streamReply() {
+  const chat = current;
+  const row = msgEl({ role: "assistant", text: "" }, -1, chat);
+  row.querySelector(".actions")?.remove();
+  row.classList.add("streaming");
+  const bubble = row.querySelector(".bubble");
+  bubble.innerHTML = '<div class="thinking"><i></i><i></i><i></i></div>';
+  els.msgs.appendChild(row);
+  els.empty.style.display = "none";
+  scrollDown(true);
+
+  let text = "", raf = 0, errMsg = "";
+  const paint = () => {
+    raf = 0;
+    if (current !== chat) return;
+    bubble.innerHTML = "";
+    const d = md(text); d.classList.add("cursor");
+    bubble.appendChild(d);
+    scrollDown();
+  };
+
+  abortCtl = new AbortController();
+  setBusy(true);
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST", signal: abortCtl.signal, credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: chat.messages, model: els.model.value, effort: settings.effort }),
+    });
+    if (res.status === 401) { showAuth("Your session expired. Please sign in again."); throw new Error("Not signed in"); }
+    if (!res.ok || !res.body) { const j = await res.json().catch(() => ({})); throw new Error(j.error || `Request failed (${res.status})`); }
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 2);
+        if (!line.startsWith("data:")) continue;
+        const ev = JSON.parse(line.slice(5));
+        if (ev.t) { text += ev.t; if (!raf) raf = requestAnimationFrame(paint); }
+        if (ev.th && !text) { const lb = bubble.querySelector(".thinking"); if (lb && !lb.dataset.l) { lb.dataset.l = 1; lb.insertAdjacentHTML("beforeend", '<span class="think-lbl">Thinking</span>'); } }
+        if (ev.error) errMsg = ev.error;
+      }
+    }
+  } catch (e) {
+    if (e.name !== "AbortError") errMsg = errMsg || e.message;
+  }
+  if (raf) cancelAnimationFrame(raf);
+  setBusy(false); abortCtl = null;
+  if (!user) return;
+  if (text || errMsg) chat.messages.push({ role: "assistant", text, ...(errMsg ? { err: errMsg } : {}) });
+  await persist(chat);
+  if (current === chat) renderMessages();
+}
+
+async function sendMessage(textOverride) {
+  if (busy) { abortCtl?.abort(); return; }
+  const text = (textOverride ?? els.input.value).trim();
+  if (!text && !pending.length) return;
+  if (config.hasKey === false) toast("The server has no Anthropic API key yet.", "err");
+  const chat = current;
+  chat.messages.push({ role: "user", text, attachments: pending });
+  if (chat.messages.length === 1) chat.title = (text || pending[0]?.name || "New chat").replace(/\s+/g, " ").slice(0, 48);
+  chat.model = els.model.value;
+  els.input.value = ""; autoGrow();
+  pending = []; renderPending();
+  renderMessages();
+  ls.set("neon-last-" + user.username, chat.id);
+  streamReply();           // start streaming immediately
+  persist(chat);           // save the user message in the background
+}
+
+async function regenerate() {
+  if (busy) return;
+  while (current.messages.length && current.messages.at(-1).role === "assistant") current.messages.pop();
+  if (!current.messages.length) return;
+  renderMessages();
+  streamReply();
+}
+
+// ---------- attachments ----------
+const TEXT_EXT = /\.(txt|md|csv|json|js|ts|jsx|tsx|py|html|css|java|c|cpp|h|cs|go|rs|rb|php|sh|sql|ya?ml|xml|log|toml|ini|env|vue|svelte|kt|swift)$/i;
+const readAs = (file, how) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r[how](file); });
+
+async function shrinkImage(file) {
+  const url = await readAs(file, "readAsDataURL");
+  if (file.type === "image/gif") return { mediaType: "image/gif", data: url.split(",")[1] };
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+  const max = 1568, s = Math.min(1, max / Math.max(img.width, img.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+  const g = c.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
+  g.drawImage(img, 0, 0, c.width, c.height);
+  return { mediaType: "image/jpeg", data: c.toDataURL("image/jpeg", 0.85).split(",")[1] };
+}
+
+async function addFiles(files) {
+  for (const f of files) {
+    try {
+      if (f.type.startsWith("image/")) {
+        const r = await shrinkImage(f);
+        pending.push({ kind: "image", name: f.name || "image", ...r });
+      } else if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) {
+        if (f.size > 20 * 1024 * 1024) { toast(`${f.name} is over 20 MB`, "err"); continue; }
+        const data = (await readAs(f, "readAsDataURL")).split(",")[1];
+        pending.push({ kind: "pdf", name: f.name, data });
+      } else if (f.type.startsWith("text/") || TEXT_EXT.test(f.name) || f.size < 200000) {
+        if (f.size > 2 * 1024 * 1024) { toast(`${f.name} is too large (2 MB max for text files)`, "err"); continue; }
+        const content = await readAs(f, "readAsText");
+        if (/\u0000/.test(content.slice(0, 2000))) { toast(`${f.name} looks like a binary file; not supported`, "err"); continue; }
+        pending.push({ kind: "text", name: f.name, content });
+      } else toast(`Unsupported file: ${f.name}`, "err");
+    } catch { toast(`Could not read ${f.name}`, "err"); }
+  }
+  renderPending();
+}
+
+function renderPending() {
+  els.atts.innerHTML = "";
+  pending.forEach((a, i) => {
+    const w = document.createElement("div");
+    w.className = "att";
+    if (a.kind === "image") { const im = document.createElement("img"); im.src = `data:${a.mediaType};base64,${a.data}`; im.alt = a.name; w.appendChild(im); }
+    else { const c = document.createElement("div"); c.className = "file-chip"; c.innerHTML = `${icon("file")}<span class="n"></span>`; c.querySelector(".n").textContent = a.name; w.appendChild(c); }
+    const rm = document.createElement("button");
+    rm.className = "rm"; rm.type = "button"; rm.setAttribute("aria-label", "Remove"); rm.innerHTML = icon("x");
+    rm.onclick = () => { pending.splice(i, 1); renderPending(); };
+    w.appendChild(rm);
+    els.atts.appendChild(w);
+  });
+}
+
+// ---------- misc UI ----------
+function autoGrow() { els.input.style.height = "auto"; els.input.style.height = Math.min(els.input.scrollHeight, 200) + "px"; }
+function openSide() { els.sidebar.classList.add("open"); els.scrim.classList.add("show"); }
+function closeSide() { els.sidebar.classList.remove("open"); els.scrim.classList.remove("show"); }
+
+els.send.onclick = () => sendMessage();
+els.input.addEventListener("input", autoGrow);
+els.input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
+});
+els.input.addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData?.files || [])];
+  if (files.length) { e.preventDefault(); addFiles(files); }
+});
+$("attachBtn").onclick = () => els.file.click();
+els.file.onchange = () => { addFiles([...els.file.files]); els.file.value = ""; };
+["dragenter", "dragover"].forEach((ev) => document.addEventListener(ev, (e) => { if (!user) return; e.preventDefault(); els.composer.classList.add("drag"); }));
+["dragleave", "drop"].forEach((ev) => document.addEventListener(ev, (e) => { e.preventDefault(); if (ev === "drop" || e.target === document.documentElement) els.composer.classList.remove("drag"); }));
+document.addEventListener("drop", (e) => { if (user && e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]); });
+
+$("newChat").onclick = () => { startNew(); closeSide(); };
+$("openSide").onclick = openSide; $("closeSide").onclick = closeSide; els.scrim.onclick = closeSide;
+
+let searchT = 0;
+els.search.oninput = () => {
+  clearTimeout(searchT);
+  searchT = setTimeout(() => loadList(), 250);
+};
+async function loadList() {
+  try {
+    const { chats: list } = await api("/api/chats?q=" + encodeURIComponent(els.search.value.trim()));
+    chats = list; renderList();
+  } catch {}
+}
+
+// ----- custom model dropdown (native <select> stays hidden as the source of truth) -----
+const MODEL_STYLE = { "claude-opus-5-5": ["#00e5ff", "0,229,255"], "claude-sonnet-5-5": ["#8b5cf6", "139,92,246"], "claude-haiku-5-5": ["#ff2bd6", "255,43,214"] };
+const GEMINI_COLORS = [["#3dffa8", "61,255,168"], ["#ffb347", "255,179,71"], ["#5b8cff", "91,140,255"], ["#ff5c7a", "255,92,122"]];
+const styleFor = (id) => MODEL_STYLE[id] || GEMINI_COLORS[Math.max(0, config.models.filter((m) => m.provider === "gemini").findIndex((m) => m.id === id)) % GEMINI_COLORS.length];
+const dd = { root: $("modelDD"), btn: $("ddBtn"), menu: $("ddMenu"), label: $("ddLabel"), idx: -1 };
+const modelParts = (name) => { const [n, d] = name.split("·").map((x) => x.trim()); return [n, d ? d[0].toUpperCase() + d.slice(1) : ""]; };
+function buildModelMenu() {
+  dd.menu.innerHTML = "";
+  let lastProv = "";
+  [...els.model.options].forEach((o, i) => {
+    if (o.dataset.provider !== lastProv) {
+      lastProv = o.dataset.provider;
+      const head = document.createElement("div");
+      head.className = "dd-head" + (i ? " sep" : "");
+      head.textContent = lastProv === "gemini" ? "Gemini" : "Claude";
+      dd.menu.appendChild(head);
+      if (lastProv === "gemini" && !config.hasGemini) {
+        const note = document.createElement("div");
+        note.className = "dd-note"; note.textContent = "Add GEMINI_API_KEY in Render to use these.";
+        dd.menu.appendChild(note);
+      }
+    }
+    const [n, d] = modelParts(o.text), [c, rgb] = styleFor(o.value);
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "dd-item"; b.setAttribute("role", "option"); b.dataset.v = o.value; b.dataset.i = i;
+    b.style.setProperty("--c", c); b.style.setProperty("--rgb", rgb);
+    b.innerHTML = `<span class="dd-dot"></span><span class="txt"><span class="nm"></span><span class="ds"></span></span>${icon("check", "tick")}`;
+    b.querySelector(".nm").textContent = n; b.querySelector(".ds").textContent = d;
+    b.onclick = () => { els.model.value = o.value; syncModelUI(); els.model.onchange(); toggleDD(false); dd.btn.focus(); };
+    dd.menu.appendChild(b);
+  });
+  syncModelUI();
+}
+function syncModelUI() {
+  const o = els.model.selectedOptions[0];
+  if (!o) return;
+  dd.label.textContent = modelParts(o.text)[0];
+  dd.btn.style.setProperty("--c", styleFor(o.value)[0]);
+  dd.btn.querySelector(".dd-dot").style.setProperty("--c", styleFor(o.value)[0]);
+  syncEffortUI();
+  dd.menu.querySelectorAll(".dd-item").forEach((b) => { const on = b.dataset.v === o.value; b.classList.toggle("sel", on); b.setAttribute("aria-selected", on); });
+}
+function focusItem(i) {
+  const items = [...dd.menu.querySelectorAll(".dd-item")];
+  if (!items.length) return;
+  dd.idx = (i + items.length) % items.length;
+  items.forEach((b, j) => b.classList.toggle("focus", j === dd.idx));
+}
+function toggleDD(open = !dd.root.classList.contains("open")) {
+  if (open && typeof toggleEff === "function") toggleEff(false);
+  dd.root.classList.toggle("open", open);
+  dd.btn.setAttribute("aria-expanded", open);
+  if (open) focusItem([...els.model.options].findIndex((o) => o.value === els.model.value));
+}
+dd.btn.onclick = () => toggleDD();
+dd.btn.addEventListener("keydown", (e) => {
+  const open = dd.root.classList.contains("open");
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); if (!open) toggleDD(true); else focusItem(dd.idx + (e.key === "ArrowDown" ? 1 : -1)); }
+  else if ((e.key === "Enter" || e.key === " ") && open) { e.preventDefault(); dd.menu.querySelectorAll(".dd-item")[dd.idx]?.click(); }
+  else if (e.key === "Escape" && open) { e.stopPropagation(); toggleDD(false); }
+});
+document.addEventListener("pointerdown", (e) => { if (!dd.root.contains(e.target)) toggleDD(false); });
+
+// ----- effort control -----
+const EFFORTS = [
+  { name: "Low", color: "#3dffa8", sub: "No extended thinking", desc: "Fastest replies. Best for simple questions and quick edits." },
+  { name: "Medium", color: "#00e5ff", sub: "Light thinking", desc: "Balanced. A little reasoning before it answers." },
+  { name: "High", color: "#8b5cf6", sub: "Deep thinking", desc: "Reasons for longer. Better for harder problems, code and maths." },
+  { name: "Max", color: "#ff2bd6", sub: "Maximum thinking", desc: "Longest thinking. Slowest, and uses the most quota." },
+];
+const eff = { root: $("eff"), btn: $("effBtn"), range: $("effRange"), slider: $("effSlider") };
+function syncEffortUI() {
+  const e = EFFORTS[settings.effort] || EFFORTS[1];
+  eff.root.style.setProperty("--ec", e.color);
+  eff.range.value = settings.effort;
+  eff.slider.style.setProperty("--p", settings.effort / 3);
+  $("effTitle").textContent = e.name.toUpperCase();
+  const m = els.model.selectedOptions[0];
+  $("effSub").textContent = (m ? modelParts(m.text)[0] + " · " : "") + e.sub;
+  $("effDesc").textContent = e.desc;
+  $("effBtnLabel").textContent = e.name;
+  document.querySelectorAll(".eff-ticks span").forEach((t, i) => t.classList.toggle("on", i === settings.effort));
+}
+let saveT = 0;
+function saveSettingsQuiet() { clearTimeout(saveT); saveT = setTimeout(() => api("/api/settings", { method: "PUT", body: { system: settings.system || "", model: els.model.value, effort: settings.effort } }).then((r) => { if (r?.settings) settings = { ...settings, ...r.settings }; }).catch(() => {}), 400); }
+function setEffort(v) { settings.effort = Math.max(0, Math.min(3, Number(v))); syncEffortUI(); saveSettingsQuiet(); }
+function toggleEff(open = !eff.root.classList.contains("open")) {
+  eff.root.classList.toggle("open", open);
+  eff.btn.setAttribute("aria-expanded", open);
+  if (open) { toggleDD(false); setTimeout(() => eff.range.focus({ preventScroll: true }), 50); }
+}
+eff.btn.onclick = () => toggleEff();
+eff.range.addEventListener("input", () => setEffort(eff.range.value));
+$("effReset").onclick = () => setEffort(config.defaultEffort ?? 1);
+eff.root.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); toggleEff(false); eff.btn.focus(); } });
+document.addEventListener("pointerdown", (e) => { if (!eff.root.contains(e.target)) toggleEff(false); });
+
+els.model.onchange = () => {
+  settings.model = els.model.value;
+  if (current) current.model = els.model.value;
+  saveSettingsQuiet();
+};
+document.querySelectorAll(".chip").forEach((c) => (c.onclick = () => sendMessage(c.querySelector("span").textContent)));
+
+function openSettings() {
+  $("sysPrompt").value = settings.system || "";
+  $("settings").classList.remove("hidden");
+}
+function closeSettings() { $("settings").classList.add("hidden"); }
+$("settingsBtn").onclick = openSettings;
+$("closeSettings").onclick = closeSettings;
+$("settings").onmousedown = (e) => { if (e.target === $("settings")) closeSettings(); };
+$("saveSettings").onclick = async () => {
+  try {
+    const r = await api("/api/settings", { method: "PUT", body: { system: $("sysPrompt").value.trim(), model: els.model.value, effort: settings.effort } });
+    settings = r.settings; closeSettings(); toast("Settings saved.");
+  } catch (err) { toast(err.message, "err"); }
+};
+$("clearAll").onclick = async () => {
+  if (!(await dialog({ title: "Delete ALL chats?", message: "This permanently removes every chat on your account, on all devices.", ok: "Delete everything", danger: true }))) return;
+  try {
+    await api("/api/chats", { method: "DELETE" });
+    chats = []; startNew(); closeSettings(); toast("All chats deleted.");
+  } catch (err) { toast(err.message, "err"); }
+};
+$("logoutBtn").onclick = async () => {
+  try { await api("/api/logout", { method: "POST", noAuthRedirect: true }); } catch {}
+  showAuth(); toast("Signed out.");
+};
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (dd.root.classList.contains("open")) toggleDD(false);
+  else if (eff.root.classList.contains("open")) toggleEff(false);
+  else if (!$("dialog").classList.contains("hidden")) $("dlgCancel").click();
+  else if (!$("settings").classList.contains("hidden")) closeSettings();
+  else closeSide();
+});
+
+// ---------- cross-device sync ----------
+async function syncNow() {
+  if (!user || document.hidden || els.search.value.trim()) return;
+  try {
+    const { chats: list } = await api("/api/chats", { noAuthRedirect: true });
+    chats = list; renderList();
+    if (current && !busy) {
+      const m = list.find((c) => c.id === current.id);
+      if (m && m.updated > current.updated) {
+        const { chat } = await api(`/api/chats/${current.id}`, { noAuthRedirect: true });
+        if (!busy && current.id === chat.id) { current = chat; renderMessages(); renderList(); }
+      }
+    }
+  } catch (e) { if (e.status === 401) showAuth("Your session expired. Please sign in again."); }
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) syncNow(); });
+addEventListener("focus", syncNow);
+
+// ---------- boot ----------
+async function enterApp(data) {
+  user = data.user; settings = { system: "", model: "", effort: config.defaultEffort ?? 1, ...(data.settings || {}) };
+  $("auth").classList.add("hidden"); $("app").classList.remove("hidden");
+  $("meName").textContent = user.username; $("meAvatar").textContent = user.username[0];
+  $("setName").textContent = user.username; $("setAvatar").textContent = user.username[0];
+  els.model.innerHTML = "";
+  config.models.forEach((m) => { const o = new Option(m.name, m.id); o.dataset.provider = m.provider; els.model.add(o); });
+  els.model.value = config.models.some((m) => m.id === settings.model) ? settings.model : config.defaultModel;
+  buildModelMenu();
+  if (config.hasKey === false) $("emptyMsg").textContent = "The server has no ANTHROPIC_API_KEY yet. Add it in Render's environment settings.";
+  els.search.value = "";
+  current = null;
+  try { chats = (await api("/api/chats")).chats; } catch { chats = []; }
+  const last = ls.get("neon-last-" + user.username);
+  if (last && chats.some((c) => c.id === last)) await openChat(last); else startNew();
+  renderList();
+  clearInterval(syncTimer);
+  syncTimer = setInterval(syncNow, 25000);
+}
+
+(async function init() {
+  try { config = await (await fetch("/api/config")).json(); } catch {}
+  try {
+    const data = await api("/api/me", { noAuthRedirect: true });
+    await enterApp(data);
+  } catch {
+    showAuth();
+  }
+})();
