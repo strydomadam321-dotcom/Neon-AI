@@ -15,8 +15,8 @@ const MODELS = [
   { id: "claude-haiku-5-5", name: "Haiku 5.5 · fastest" },
 ];
 const DEFAULT_MODEL = process.env.DEFAULT_MODEL || MODELS[0].id;
-// Optional: if set, people need this code to create an account (keeps strangers from spending your credits)
-const INVITE_CODE = process.env.INVITE_CODE || process.env.APP_PASSWORD || "";
+// Signup gate: people must answer this question to create an account (keeps strangers from spending your credits).
+const SIGNUP_ANSWER = (process.env.SIGNUP_ANSWER || "ivke").trim().toLowerCase();
 const SYSTEM =
   "You are a helpful, sharp AI assistant inside a futuristic neon chat app. " +
   "Answer clearly and concisely. Use Markdown, and fenced code blocks with language tags for code.";
@@ -144,7 +144,7 @@ const big = express.json({ limit: "45mb" });
 
 // ---------- auth ----------
 app.get("/api/config", (req, res) => {
-  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, needsInvite: !!INVITE_CODE, hasKey: !!process.env.ANTHROPIC_API_KEY });
+  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, needsInvite: true, hasKey: !!process.env.ANTHROPIC_API_KEY });
 });
 
 const USER_RE = /^[A-Za-z0-9_.-]{3,24}$/;
@@ -152,17 +152,17 @@ const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", 10);
 
 app.post("/api/signup", small, wrap(async (req, res) => {
   if (limited("signup:" + req.ip, 8, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
-  const { username, password, remember, invite } = req.body || {};
+  const { username, password, remember, answer } = req.body || {};
   if (typeof username !== "string" || !USER_RE.test(username))
     return res.status(400).json({ error: "Username must be 3-24 characters: letters, numbers, . _ -", field: "username" });
   if (typeof password !== "string" || password.length < 8)
     return res.status(400).json({ error: "Password must be at least 8 characters.", field: "password" });
   if (Buffer.byteLength(password) > 72)
     return res.status(400).json({ error: "Password is too long (72 bytes max).", field: "password" });
-  if (INVITE_CODE) {
-    const a = Buffer.from(String(invite || "")), b = Buffer.from(INVITE_CODE);
+  {
+    const a = Buffer.from(String(answer || "").trim().toLowerCase()), b = Buffer.from(SIGNUP_ANSWER);
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b))
-      return res.status(403).json({ error: "Wrong invite code.", field: "invite" });
+      return res.status(403).json({ error: "That's not the right answer.", field: "answer" });
   }
   const hash = await bcrypt.hash(password, 11);
   let user;

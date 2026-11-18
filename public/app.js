@@ -116,17 +116,18 @@ authEls.form.onsubmit = async (e) => {
   if (mode === "signup" && !/^[A-Za-z0-9_.-]{3,24}$/.test(username)) return fieldErr("fUser", "Username: 3-24 characters, letters, numbers, . _ -");
   if (!password) return fieldErr("fPass", "Enter your password.");
   if (mode === "signup" && password.length < 8) return fieldErr("fPass", "Password must be at least 8 characters.");
+  if (mode === "signup" && !$("invite").value.trim()) return fieldErr("fInvite", "Answer the question to create an account.");
   authEls.btn.classList.add("loading"); authEls.btn.disabled = true;
   try {
     const data = await api(mode === "login" ? "/api/login" : "/api/signup", {
       method: "POST", noAuthRedirect: true,
-      body: { username, password, remember: $("remember").checked, invite: $("invite").value },
+      body: { username, password, remember: $("remember").checked, answer: $("invite").value },
     });
     authEls.pass.value = ""; $("invite").value = "";
     await enterApp(data);
     if (mode === "signup") toast("Account created. Welcome aboard.");
   } catch (err) {
-    const map = { username: "fUser", password: "fPass", invite: "fInvite" };
+    const map = { username: "fUser", password: "fPass", answer: "fInvite" };
     if (map[err.field]) fieldErr(map[err.field], err.message);
     else { authEls.err.textContent = err.message; if (err.status === 401) { const f = $("fPass"); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad"); } }
   } finally {
@@ -338,7 +339,7 @@ async function openChat(id) {
     const { chat } = await api(`/api/chats/${id}`);
     current = chat;
   } catch (err) { toast(err.message, "err"); return; }
-  if (current.model && [...els.model.options].some((o) => o.value === current.model)) els.model.value = current.model;
+  if (current.model && [...els.model.options].some((o) => o.value === current.model)) { els.model.value = current.model; syncModelUI(); }
   pending = []; renderPending(); renderMessages(); renderList();
   ls.set("neon-last-" + user.username, id);
 }
@@ -534,6 +535,52 @@ async function loadList() {
   } catch {}
 }
 
+// ----- custom model dropdown (native <select> stays hidden as the source of truth) -----
+const MODEL_STYLE = { "claude-opus-5-5": ["#00e5ff", "0,229,255"], "claude-sonnet-5-5": ["#8b5cf6", "139,92,246"], "claude-haiku-5-5": ["#ff2bd6", "255,43,214"] };
+const dd = { root: $("modelDD"), btn: $("ddBtn"), menu: $("ddMenu"), label: $("ddLabel"), idx: -1 };
+const modelParts = (name) => { const [n, d] = name.split("·").map((x) => x.trim()); return [n, d ? d[0].toUpperCase() + d.slice(1) : ""]; };
+function buildModelMenu() {
+  dd.menu.innerHTML = '<div class="dd-head">Model</div>';
+  [...els.model.options].forEach((o, i) => {
+    const [n, d] = modelParts(o.text), [c, rgb] = MODEL_STYLE[o.value] || ["#00e5ff", "0,229,255"];
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "dd-item"; b.setAttribute("role", "option"); b.dataset.v = o.value; b.dataset.i = i;
+    b.style.setProperty("--c", c); b.style.setProperty("--rgb", rgb);
+    b.innerHTML = `<span class="dd-dot"></span><span class="txt"><span class="nm"></span><span class="ds"></span></span>${icon("check", "tick")}`;
+    b.querySelector(".nm").textContent = n; b.querySelector(".ds").textContent = d;
+    b.onclick = () => { els.model.value = o.value; syncModelUI(); els.model.onchange(); toggleDD(false); dd.btn.focus(); };
+    dd.menu.appendChild(b);
+  });
+  syncModelUI();
+}
+function syncModelUI() {
+  const o = els.model.selectedOptions[0];
+  if (!o) return;
+  dd.label.textContent = modelParts(o.text)[0];
+  dd.btn.style.setProperty("--c", (MODEL_STYLE[o.value] || ["#00e5ff"])[0]);
+  dd.btn.querySelector(".dd-dot").style.setProperty("--c", (MODEL_STYLE[o.value] || ["#00e5ff"])[0]);
+  dd.menu.querySelectorAll(".dd-item").forEach((b) => { const on = b.dataset.v === o.value; b.classList.toggle("sel", on); b.setAttribute("aria-selected", on); });
+}
+function focusItem(i) {
+  const items = [...dd.menu.querySelectorAll(".dd-item")];
+  if (!items.length) return;
+  dd.idx = (i + items.length) % items.length;
+  items.forEach((b, j) => b.classList.toggle("focus", j === dd.idx));
+}
+function toggleDD(open = !dd.root.classList.contains("open")) {
+  dd.root.classList.toggle("open", open);
+  dd.btn.setAttribute("aria-expanded", open);
+  if (open) focusItem([...els.model.options].findIndex((o) => o.value === els.model.value));
+}
+dd.btn.onclick = () => toggleDD();
+dd.btn.addEventListener("keydown", (e) => {
+  const open = dd.root.classList.contains("open");
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); if (!open) toggleDD(true); else focusItem(dd.idx + (e.key === "ArrowDown" ? 1 : -1)); }
+  else if ((e.key === "Enter" || e.key === " ") && open) { e.preventDefault(); dd.menu.querySelectorAll(".dd-item")[dd.idx]?.click(); }
+  else if (e.key === "Escape" && open) { e.stopPropagation(); toggleDD(false); }
+});
+document.addEventListener("pointerdown", (e) => { if (!dd.root.contains(e.target)) toggleDD(false); });
+
 els.model.onchange = () => {
   settings.model = els.model.value;
   if (current) current.model = els.model.value;
@@ -567,18 +614,10 @@ $("logoutBtn").onclick = async () => {
   showAuth(); toast("Signed out.");
 };
 
-$("exportBtn").onclick = () => {
-  if (!current?.messages.length) return;
-  const out = `# ${current.title}\n\n` + current.messages.map((m) => `**${m.role === "user" ? "You" : "AI"}:**\n\n${m.text}\n`).join("\n---\n\n");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([out], { type: "text/markdown" }));
-  a.download = (current.title.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-") || "chat") + ".md";
-  a.click(); URL.revokeObjectURL(a.href);
-};
-
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (!$("dialog").classList.contains("hidden")) $("dlgCancel").click();
+  if (dd.root.classList.contains("open")) toggleDD(false);
+  else if (!$("dialog").classList.contains("hidden")) $("dlgCancel").click();
   else if (!$("settings").classList.contains("hidden")) closeSettings();
   else closeSide();
 });
@@ -610,6 +649,7 @@ async function enterApp(data) {
   els.model.innerHTML = "";
   config.models.forEach((m) => els.model.add(new Option(m.name, m.id)));
   els.model.value = config.models.some((m) => m.id === settings.model) ? settings.model : config.defaultModel;
+  buildModelMenu();
   if (config.hasKey === false) $("emptyMsg").textContent = "The server has no ANTHROPIC_API_KEY yet. Add it in Render's environment settings.";
   els.search.value = "";
   current = null;

@@ -17,6 +17,7 @@
 <!-- icon sprite -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
     <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
     <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/></symbol>
@@ -91,8 +92,8 @@
         <span id="strengthTxt">At least 8 characters</span>
       </div>
       <label class="field" id="fInvite" hidden>
-        <svg class="ic"><use href="#i-key"/></svg>
-        <input id="invite" name="invite" type="text" placeholder="Invite code" autocomplete="off" spellcheck="false">
+        <svg class="ic"><use href="#i-shield"/></svg>
+        <input id="invite" name="answer" type="text" placeholder="What is your youngest cousin's name?" aria-label="What is your youngest cousin's name?" autocomplete="off" spellcheck="false" maxlength="60">
       </label>
 
       <label class="check">
@@ -136,8 +137,14 @@
       <button id="openSide" class="icon only-mobile" aria-label="Open menu"><svg class="ic"><use href="#i-menu"/></svg></button>
       <div id="chatTitle" class="chat-title">New chat</div>
       <span id="syncDot" class="sync" title="Synced"></span>
-      <div class="select-wrap"><select id="model" aria-label="Model"></select></div>
-      <button id="exportBtn" class="icon" aria-label="Export chat" title="Export chat"><svg class="ic"><use href="#i-download"/></svg></button>
+      <div class="dd" id="modelDD">
+        <select id="model" aria-label="Model" hidden></select>
+        <button type="button" class="dd-btn" id="ddBtn" aria-haspopup="listbox" aria-expanded="false">
+          <span class="dd-dot"></span><span class="dd-label" id="ddLabel"></span>
+          <svg class="ic chev"><use href="#i-chev"/></svg>
+        </button>
+        <div class="dd-menu" id="ddMenu" role="listbox" aria-label="Choose a model"></div>
+      </div>
     </header>
 
     <div id="messages" class="messages">

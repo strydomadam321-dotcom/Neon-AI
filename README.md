@@ -4,7 +4,7 @@ A neon, ChatGPT-style web chat for Claude. Accounts with username + password, ch
 (continue them from any device), streaming replies, image / PDF / code-file uploads.
 
 ## Features
-- Sign up / sign in (password 8+ characters), optional "stay signed in for 30 days"
+- Sign up (must answer a security question) / sign in (password 8+ characters), optional "stay signed in for 30 days"
 - Chats stored in Postgres per account, so they follow you across devices
 - Search, rename, delete, export chats; custom instructions synced to your account
 - Flickering neon visuals, animated background, all icons are SVG
@@ -14,7 +14,7 @@ A neon, ChatGPT-style web chat for Claude. Accounts with username + password, ch
 |---|---|---|
 | `DATABASE_URL` | yes | Postgres connection string (Render fills this in from `render.yaml`) |
 | `ANTHROPIC_API_KEY` | yes | Your Anthropic key |
-| `INVITE_CODE` | recommended | If set, people need this code to create an account. Without it anyone with the URL can sign up and spend your credits |
+| `SIGNUP_ANSWER` | no | Answer to the signup question ("What is your youngest cousin's name?"). Defaults to the built-in answer; set it to change the answer without touching code |
 | `DEFAULT_MODEL` | no | `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5` |
 
 ## Run locally
