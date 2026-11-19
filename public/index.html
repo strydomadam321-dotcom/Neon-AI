@@ -7,7 +7,8 @@
 <title>NEON AI</title>
 <script>
 try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = document.documentElement;
-  if (L.retro) R.dataset.theme = "retro"; if (L.bg === false) R.classList.add("no-bg-anim"); if (L.flicker === false) R.classList.add("no-flicker"); } catch (e) {}
+  R.dataset.gfx = L.gfx === "gpu" ? "gpu" : "cpu";   // graphics mode is per device; CPU unless you picked GPU here
+  if (L.retro) R.dataset.theme = "retro"; if (L.bg === false) R.classList.add("no-bg-anim"); if (L.flicker === false) R.classList.add("no-flicker"); } catch (e) { document.documentElement.dataset.gfx = "cpu"; }
 </script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300e5ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13 2 3 14h9l-1 8 10-12h-9Z'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -269,6 +270,14 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
           <div class="txt"><b>Animated background</b><span>Drifting particles, light rays and the moving grid</span></div>
           <input type="checkbox" id="optBg" role="switch"><span class="sw"></span>
         </label>
+        <div class="set-row" role="radiogroup" aria-labelledby="gfxLbl">
+          <div class="txt"><b id="gfxLbl">Graphics (this device only)</b><span>CPU: lighter effects that run on any computer. GPU: full glow, blur and 3D effects, needs a graphics card.</span></div>
+          <div class="seg">
+            <label><input type="radio" name="gfx" value="cpu" id="optGfxCpu"><span>CPU</span></label>
+            <label><input type="radio" name="gfx" value="gpu" id="optGfxGpu"><span>GPU</span></label>
+          </div>
+        </div>
+        <p class="gfx-info" id="gfxInfo"></p>
         <label class="set-row toggle">
           <div class="txt"><b>Flickering neon text</b><span>The glitchy flicker on the NEON AI logo</span></div>
           <input type="checkbox" id="optFlicker" role="switch"><span class="sw"></span>

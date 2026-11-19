@@ -1,4 +1,5 @@
 "use strict";
+if (!Array.prototype.at) Object.defineProperty(Array.prototype, "at", { value: function (i) { i = Math.trunc(i) || 0; if (i < 0) i += this.length; return this[i]; }, writable: true, configurable: true });
 const $ = (id) => document.getElementById(id);
 const els = {
   list: $("chatList"), msgs: $("messages"), empty: $("empty"), input: $("input"), send: $("send"),
@@ -17,7 +18,8 @@ const ls = {
 // ---------- state ----------
 let config = { models: [], defaultModel: "", needsInvite: false, hasKey: true, hasGemini: false, defaultEffort: 1 };
 let user = null;
-let settings = { system: "", model: "", effort: 1, retro: false, bg: true, flicker: true };
+const readLook = () => { try { return JSON.parse(localStorage.getItem("neon-look") || "{}") || {}; } catch { return {}; } };
+let settings = { system: "", model: "", effort: 1, retro: false, bg: true, flicker: true, gfx: readLook().gfx === "gpu" ? "gpu" : "cpu" };
 let chats = [];          // metadata list for the sidebar: {id,title,model,created,updated}
 let current = null;      // active chat (full object incl. messages)
 let pending = [];        // attachments waiting to be sent
@@ -31,7 +33,9 @@ function applyLook() {
   if (settings.retro) R.dataset.theme = "retro"; else delete R.dataset.theme;
   R.classList.toggle("no-bg-anim", settings.bg === false);
   R.classList.toggle("no-flicker", settings.flicker === false);
-  try { localStorage.setItem("neon-look", JSON.stringify({ retro: !!settings.retro, bg: settings.bg !== false, flicker: settings.flicker !== false })); } catch {}
+  R.dataset.gfx = settings.gfx === "gpu" ? "gpu" : "cpu";
+  try { localStorage.setItem("neon-look", JSON.stringify({ retro: !!settings.retro, bg: settings.bg !== false, flicker: settings.flicker !== false, gfx: R.dataset.gfx })); } catch {}
+  window.dispatchEvent(new Event("neon-look"));       // lets fx.js rebuild its canvases for the new mode
 }
 
 // ---------- toasts + dialogs ----------
@@ -844,23 +848,44 @@ els.model.onchange = () => {
 document.querySelectorAll(".chip").forEach((c) => (c.onclick = () => sendMessage(c.querySelector("span").textContent)));
 
 // Settings are drafts: nothing is applied or saved until you press Save.
-const setFields = { retro: $("optRetro"), bg: $("optBg"), flicker: $("optFlicker"), sys: $("sysPrompt") };
+const setFields = { retro: $("optRetro"), bg: $("optBg"), flicker: $("optFlicker"), sys: $("sysPrompt"), gfxCpu: $("optGfxCpu"), gfxGpu: $("optGfxGpu") };
+const draftGfx = () => (setFields.gfxGpu.checked ? "gpu" : "cpu");
 function fillSettings() {
   setFields.retro.checked = !!settings.retro;
   setFields.bg.checked = settings.bg !== false;
   setFields.flicker.checked = settings.flicker !== false;
   setFields.sys.value = settings.system || "";
+  setFields.gfxGpu.checked = settings.gfx === "gpu"; setFields.gfxCpu.checked = settings.gfx !== "gpu";
 }
 const isDirty = () =>
   setFields.retro.checked !== !!settings.retro || setFields.bg.checked !== (settings.bg !== false) ||
-  setFields.flicker.checked !== (settings.flicker !== false) || setFields.sys.value.trim() !== (settings.system || "").trim();
+  setFields.flicker.checked !== (settings.flicker !== false) || setFields.sys.value.trim() !== (settings.system || "").trim() ||
+  draftGfx() !== (settings.gfx === "gpu" ? "gpu" : "cpu");
 function updateUnsaved() {
   const bar = $("unsaved"), dirty = isDirty();
   if (dirty && bar.hidden) { bar.hidden = false; bar.style.animation = "none"; void bar.offsetWidth; bar.style.animation = ""; }
   else if (!dirty) bar.hidden = true;
 }
+// what this device reports: helps explain why effects look the way they do
+let gpuName = null;
+function detectGpu() {
+  if (gpuName !== null) return gpuName;
+  gpuName = "";
+  try {
+    const c = document.createElement("canvas"), gl = c.getContext("webgl") || c.getContext("experimental-webgl");
+    if (!gl) gpuName = "no WebGL (no graphics acceleration)";
+    else { const x = gl.getExtension("WEBGL_debug_renderer_info"); gpuName = x ? String(gl.getParameter(x.UNMASKED_RENDERER_WEBGL)) : "a graphics adapter"; const l = gl.getExtension("WEBGL_lose_context"); if (l) l.loseContext(); }
+  } catch { gpuName = "unknown"; }
+  return gpuName;
+}
+function showGfxInfo() {
+  const g = detectGpu(), soft = /swiftshader|llvmpipe|software|basic render|no webgl/i.test(g);
+  const rm = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  $("gfxInfo").textContent = `Detected: ${g || "unknown"}${soft ? " (software rendering, CPU mode is the right choice)" : ""}. ` +
+    (rm ? "Your system asks apps to reduce motion; the effects are still shown. Use the switches here to calm them down." : "");
+}
 function openSettings() {
-  fillSettings(); updateUnsaved();
+  fillSettings(); updateUnsaved(); showGfxInfo();
   $("settings").classList.remove("hidden");
   $("settings").querySelector(".set-body").scrollTop = 0;
 }
@@ -875,7 +900,7 @@ async function saveDraft() {
     const r = await api("/api/settings", { method: "PUT", body: {
       ...settingsPayload(setFields.sys.value.trim()), retro: setFields.retro.checked, bg: setFields.bg.checked, flicker: setFields.flicker.checked,
     } });
-    settings = { ...settings, ...r.settings }; applyLook(); updateUnsaved(); return true;
+    settings = { ...settings, ...r.settings, gfx: draftGfx() }; applyLook(); updateUnsaved(); return true;
   } catch (err) { toast(err.message, "err"); return false; }
 }
 $("settingsBtn").onclick = openSettings;
@@ -950,7 +975,7 @@ addEventListener("focus", syncNow);
 
 // ---------- boot ----------
 async function enterApp(data) {
-  user = data.user; settings = { system: "", model: "", effort: config.defaultEffort ?? 1, retro: false, bg: true, flicker: true, ...(data.settings || {}) };
+  user = data.user; settings = { system: "", model: "", effort: config.defaultEffort ?? 1, retro: false, bg: true, flicker: true, ...(data.settings || {}), gfx: readLook().gfx === "gpu" ? "gpu" : "cpu" };
   $("auth").classList.add("hidden"); $("app").classList.remove("hidden"); document.body.classList.add("in-app"); applyLook();
   $("meName").textContent = user.username; $("meAvatar").textContent = user.username[0];
   $("setName").textContent = user.username; $("setAvatar").textContent = user.username[0];

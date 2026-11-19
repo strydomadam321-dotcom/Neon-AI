@@ -4,6 +4,7 @@ A neon, ChatGPT-style web chat for Claude. Accounts with username + password, ch
 (continue them from any device), streaming replies, image / PDF / code-file uploads.
 
 ## Features
+- Graphics mode per device (Settings): CPU (default, light effects that work without a graphics card) or GPU (full glow/blur/3D). Saved on the device, not the account
 - Attach images, PDFs, Word (.docx), PowerPoint (.pptx) and text/code files (Word and PowerPoint text is read in the browser)
 - Effort control (Low / Medium / High / Max): sets how much the model thinks before answering, for both Claude and Gemini
 - Claude and Gemini models in one menu
