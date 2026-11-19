@@ -45,13 +45,22 @@ say "Installing packages (curl, rsync, PostgreSQL)"
 run apt-get update -y
 run apt-get install -y curl ca-certificates gnupg rsync openssl postgresql postgresql-client
 
+node_ok() { command -v node >/dev/null 2>&1 && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 20 ]; }
+install_node() {
+  # NodeSource first (a newer Node that includes npm); if that doesn't support this Ubuntu release yet, use Ubuntu's own packages
+  if curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs; then return 0; fi
+  warn "NodeSource didn't work on this release; using Ubuntu's own Node packages instead"
+  apt-get install -y nodejs npm
+}
+
 say "Checking Node.js (version 20 or newer is needed)"
-if command -v node >/dev/null 2>&1 && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 20 ]; then
+if node_ok; then
   echo "   found Node $(node -v)"
+elif [ "$DRY" = 1 ]; then
+  echo "   + install Node.js 22 (NodeSource, falling back to Ubuntu's own packages)"
 else
-  echo "   installing Node.js 22 from NodeSource"
-  if [ "$DRY" = 1 ]; then echo "   + curl -fsSL https://deb.nodesource.com/setup_22.x | bash -"; else curl -fsSL https://deb.nodesource.com/setup_22.x | bash -; fi
-  run apt-get install -y nodejs
+  install_node
+  node_ok || { echo "Could not install Node.js 20 or newer. Run 'node -v' and send me the output."; exit 1; }
 fi
 NODE_BIN="$(command -v node || echo /usr/bin/node)"
 
