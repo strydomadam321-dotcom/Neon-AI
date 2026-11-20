@@ -7,13 +7,13 @@
   const FILES = "abcdefgh", GLYPH = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" }, VS = "︎";
   const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9 };
   const PRESETS = [
-    { id: "mia", name: "Mia", label: "Friendly", text: "Warm, encouraging and chatty. Loves chess, compliments good moves and laughs at her own mistakes." },
-    { id: "rex", name: "Rex", label: "Trash talker", text: "Cocky street hustler who talks big and roasts the opponent playfully, but is a good sport at the end." },
-    { id: "joe", name: "Grandpa Joe", label: "Wise coach", text: "Calm old chess-club veteran. Speaks slowly, tells short stories and gives gentle advice." },
-    { id: "pip", name: "Pip", label: "Nervous", text: "Anxious beginner who panics a lot, apologises, and gets very excited when something goes right." },
-    { id: "vera", name: "Vera", label: "Cold master", text: "Icy, terse and intimidating. Few words. Treats every game as serious business." },
-    { id: "gus", name: "Gus", label: "Chaos gremlin", text: "Silly, random and hyper. Makes strange jokes and odd comparisons, never serious." },
+    { id: "india", label: "India", country: "India", name: "Arjun", text: "From Mumbai, India. Warm, enthusiastic club champion who grew up on Anand's games. Chatty and encouraging, loves a good tactic, uses an occasional Hindi word like 'arre' or 'wah', and compares chess to cricket now and then." },
+    { id: "china", label: "China", country: "China", name: "Wei", text: "From Shanghai, China. Calm, disciplined and patient. Thinks long-term, speaks politely and thoughtfully, and occasionally drops a short proverb about patience or strategy. Never rattled, even when losing." },
+    { id: "usa", label: "USA", country: "USA", name: "Jake", text: "From Austin, Texas, USA. Loud, confident, sporty and a bit of a streamer. Playful trash talk, 'let's gooo' energy, big reactions to captures, and a good sport at the end." },
+    { id: "russia", label: "Russia", country: "Russia", name: "Dmitri", text: "From Moscow, Russia. Raised in a strict chess school. Serious, terse and deadpan, with dry humour. Respects good endgames and doesn't waste words." },
+    { id: "germany", label: "Germany", country: "Germany", name: "Lukas", text: "From Munich, Germany. Precise, methodical and a little pedantic, with dry wit. Loves rules, efficiency and clean technique, and occasionally says 'genau' or 'na ja'." },
   ];
+
   const clampElo = (v) => Math.max(100, Math.min(2000, Math.round((Number(v) || 1000) / 50) * 50));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const uci = (m) => m.from + m.to + (m.promotion || "");
@@ -67,12 +67,12 @@
       </div>
       <div class="collapse open art-wrap"><div class="collapse-in"><div class="chess-body">
         <div class="ch-left">
-          <div class="ch-who"><span class="ch-av bot"></span><span class="ch-nm ch-botname"></span><span class="ch-elo-chip"></span><span class="ch-cap" data-for="bot"></span></div>
+          <div class="ch-who"><span class="ch-nm ch-botname"></span><span class="ch-elo-chip"></span><span class="ch-country"></span><span class="ch-cap" data-for="bot"></span></div>
           <div class="ch-boardwrap">
             <div class="ch-board"></div><div class="ch-pieces"></div>
             <div class="ch-promo hidden"></div><div class="ch-over hidden"></div>
           </div>
-          <div class="ch-who me"><span class="ch-av you"></span><span class="ch-nm">You</span><span class="ch-cap" data-for="you"></span></div>
+          <div class="ch-who me"><span class="ch-nm">You</span><span class="ch-cap" data-for="you"></span></div>
           <div class="ch-status" role="status"></div>
         </div>
         <div class="ch-right">
@@ -182,10 +182,9 @@
     function head() {
       $(".ch-title").textContent = st.started ? `Chess vs ${st.name} · ${st.elo}` : "Chess";
       $(".ch-botname").textContent = st.name; $(".ch-elo-chip").textContent = String(st.elo);
-      $(".ch-av.bot").textContent = (st.name || "?")[0].toUpperCase();
-      const you = $(".ch-av.you"), ph = (ctx.me && ctx.me()) || {};
-      if (ctx.paint) ctx.paint(you, ph.username || "You", ph.picture); else you.textContent = (ph.username || "Y")[0].toUpperCase();      // photo, or the first letter if there's none (or it fails to load)
-      $(".ch-who.me .ch-nm").textContent = (ph && ph.username) || "You";
+      const pre = PRESETS.find((x) => x.id === st.preset), cc = $(".ch-country");
+      cc.textContent = pre ? pre.country : ""; cc.hidden = !pre;
+      $(".ch-who.me .ch-nm").textContent = ((ctx.me && ctx.me()) || {}).username || "You";
     }
     function refreshButtons() {
       const playing = st.started && !st.over;
