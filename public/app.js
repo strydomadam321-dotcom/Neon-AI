@@ -1188,13 +1188,13 @@ $("nukeBtn").onclick = async () => {
   if (!user?.dev) return;
   const ok1 = await dialog({
     title: "Take NEON AI offline?",
-    message: "Warning: this shuts the ENTIRE website down for everyone, on freestudyresources.org and the Render address. Nobody can sign in or chat, and that includes you.",
+    message: "Warning: this shuts the ENTIRE website down for everyone, on freestudyresources.org and the Render address. Everyone sees a NEON AI has been NUKED page. Nobody can sign in or chat unless they know the bypass code.",
     ok: "I understand, continue", danger: true,
   });
   if (!ok1) return;
   const ok2 = await dialog({
     title: "Are you absolutely sure?",
-    message: "The site stays off until you ask Claude to turn it back on. There is no button on the website to undo this, and you can't get back in while it's off.",
+    message: "The site stays off until you ask Claude to turn it back on. There is no button on the website to undo this. Only the bypass code gets anyone through while it's off.",
     ok: "Yes, keep going", danger: true,
   });
   if (!ok2) return;
@@ -1208,7 +1208,7 @@ $("nukeBtn").onclick = async () => {
   try {
     await api("/api/dev/nuke", { method: "POST", body: { confirm: "NUKE" }, noAuthRedirect: true });
     closeSettings(true);
-    document.body.innerHTML = '<div style="position:fixed;inset:0;display:grid;place-items:center;background:#12062b;color:#f6e9ff;font-family:system-ui,sans-serif;text-align:center;padding:24px"><div><h1 style="letter-spacing:.2em;margin:0 0 10px;color:#ff5fd8">NEON AI</h1><p style="margin:0;color:#c9b4e8">The site is now offline. Ask Claude to turn it back on.</p></div></div>';
+    document.body.innerHTML = '<div style="position:fixed;inset:0;display:grid;place-items:center;background:#12062b;color:#f6e9ff;font-family:system-ui,sans-serif;text-align:center;padding:24px"><div><h1 style="letter-spacing:.2em;margin:0 0 10px;color:#ff5fd8">NEON AI</h1><p style="margin:0;color:#c9b4e8">NEON AI has been NUKED. Ask Claude to turn it back on.</p></div></div>';
   } catch (err) { toast(err.message, "err"); }
 };
 

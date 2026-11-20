@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import pg from "pg";
 import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -214,20 +215,105 @@ let nukedAt = (await q("select set_at from site_state where key = 'nuked'")).row
 nukedAt = nukedAt ? new Date(nukedAt).getTime() : 0;
 const siteOff = () => nukedAt > 0 && !(Date.parse(process.env.RESUME_AFTER || "") > nukedAt);
 if (siteOff()) console.warn("SITE IS NUKED: serving the offline page until RESUME_AFTER is set to a time after", new Date(nukedAt).toISOString());
-const OFFLINE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Offline · NEON AI</title>
-<style>*{box-sizing:border-box}html,body{height:100%;margin:0}body{display:grid;place-items:center;padding:24px;font-family:Inter,system-ui,"Segoe UI",Arial,sans-serif;color:#f6e9ff;text-align:center;background:radial-gradient(900px 500px at 50% 0%,rgba(255,95,216,.25),transparent 70%),#12062b}
-h1{margin:0 0 10px;font-size:30px;letter-spacing:.22em;font-weight:800;background:linear-gradient(90deg,#ff5fd8,#3df0ff);-webkit-background-clip:text;background-clip:text;color:transparent}p{margin:0;color:#c9b4e8;font-size:15px;line-height:1.5}
-.c{max-width:420px;padding:34px 28px;border-radius:20px;background:rgba(40,16,78,.6);border:1px solid rgba(255,160,240,.3);box-shadow:0 30px 80px rgba(8,1,26,.7),0 0 60px rgba(255,95,216,.18)}</style></head>
-<body><div class="c"><h1>NEON AI</h1><p>We've temporarily taken the site offline. Please check back later.</p></div></body></html>`;
+const BYPASS_CODE = process.env.NUKE_BYPASS_CODE || "";        // secret: set only in the environment, never in the code
+const BYPASS_COOKIE = "neon_bp";
+const bypassToken = () => sha(`bypass:${BYPASS_CODE}:${nukedAt}`);   // tied to this nuke and this code, so a new nuke or a new code invalidates old passes
+const hasBypass = (req) => {
+  if (!BYPASS_CODE) return false;
+  const c = getCookie(req, BYPASS_COOKIE), t = bypassToken();
+  return c.length === t.length && crypto.timingSafeEqual(Buffer.from(c), Buffer.from(t));
+};
+const FAIRS_GIF = (() => { try { return fs.readFileSync(path.join(__dirname, "assets", "fairs.gif")); } catch { return null; } })();
+const OFFLINE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>NUKED · NEON AI</title>
+<style>
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{display:grid;place-items:center;padding:22px;font-family:Inter,system-ui,"Segoe UI",Arial,sans-serif;color:#f6e9ff;text-align:center;overflow:hidden;
+ background:radial-gradient(900px 520px at 50% -5%,rgba(255,60,120,.3),transparent 70%),radial-gradient(700px 500px at 85% 105%,rgba(61,240,255,.16),transparent 70%),#12062b}
+.card{width:min(460px,100%);padding:36px 28px 28px;border-radius:22px;background:rgba(40,16,78,.62);border:1px solid rgba(255,120,180,.35);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+ box-shadow:0 30px 80px rgba(8,1,26,.75),0 0 70px rgba(255,60,120,.22),inset 0 1px 0 rgba(255,255,255,.08);animation:rise .7s cubic-bezier(.2,.9,.25,1) both}
+@keyframes rise{from{opacity:0;transform:translateY(18px) scale(.98);filter:blur(5px)}}
+.brand{margin:0;font-size:15px;letter-spacing:.42em;font-weight:800;color:#c9b4e8}
+h1{margin:10px 0 8px;font-size:clamp(30px,8.5vw,44px);line-height:1.05;font-weight:900;letter-spacing:.04em;color:#ffe7f3;text-shadow:0 0 14px rgba(255,60,120,.9),0 0 38px rgba(255,60,120,.6),0 0 80px rgba(255,60,120,.4);animation:flick 3.6s infinite}
+@keyframes flick{0%,18%,22%,62%,64%,100%{opacity:1}20%{opacity:.55}63%{opacity:.7}}
+p.sub{margin:0 0 24px;color:#c9b4e8;font-size:14.5px;line-height:1.5}
+.btn{height:48px;border:0;border-radius:13px;font-family:inherit;font-weight:700;font-size:15px;cursor:pointer;color:#260a3d;position:relative;overflow:hidden;transition:transform .2s,box-shadow .25s}
+.btn:hover{transform:translateY(-2px)}.btn:active{transform:scale(.97)}
+#fairs{width:100%;background:linear-gradient(120deg,#ff5fd8,#a66bff 55%,#3df0ff);box-shadow:0 8px 30px rgba(166,107,255,.4)}
+.or{display:flex;align-items:center;gap:12px;margin:20px 0 14px;color:#8d79b3;font-size:12px;letter-spacing:.1em;text-transform:uppercase}
+.or:before,.or:after{content:"";flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(255,160,240,.35),transparent)}
+form{display:flex;gap:8px}
+input{flex:1;min-width:0;height:48px;padding:0 14px;border-radius:12px;border:1px solid rgba(255,160,240,.3);background:rgba(8,2,26,.55);color:#fff;font:inherit;outline:0;transition:border-color .25s,box-shadow .25s}
+input:focus{border-color:#3df0ff;box-shadow:0 0 18px rgba(61,240,255,.4)}
+input::placeholder{color:#8d79b3}
+#go{width:84px;background:rgba(255,255,255,.08);color:#f6e9ff;border:1px solid rgba(255,160,240,.35)}
+#go:hover{border-color:#3df0ff;box-shadow:0 0 18px rgba(61,240,255,.35)}
+#err{min-height:20px;margin:10px 2px 0;color:#ff8aa5;font-size:13.5px;text-align:left}
+form.bad input{border-color:#ff5c7a;animation:shake .4s}
+@keyframes shake{20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
+#pop{position:fixed;inset:0;display:grid;place-items:center;background:rgba(8,1,26,.72);opacity:0;pointer-events:none;z-index:9}
+#pop.on{opacity:1;pointer-events:auto}
+#pop img{max-width:min(80vw,400px);max-height:80vh;border-radius:16px;box-shadow:0 0 70px rgba(255,95,216,.6);transform:scale(.7)}
+#pop.on img{animation:pop .22s cubic-bezier(.3,1.5,.5,1) both}
+@keyframes pop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+</style></head>
+<body>
+<main class="card">
+  <p class="brand">NEON AI</p>
+  <h1>NEON AI has been NUKED</h1>
+  <p class="sub">The whole site has been shut down. It will be back when it's turned on again.</p>
+  <button class="btn" id="fairs" type="button">#Fairs</button>
+  <div class="or"><span>or enter the bypass code</span></div>
+  <form id="bp" autocomplete="off"><input id="code" type="password" placeholder="Bypass code" aria-label="Bypass code" spellcheck="false" autocapitalize="none" maxlength="120"><button class="btn" id="go" type="submit">Enter</button></form>
+  <div id="err" role="alert"></div>
+</main>
+<div id="pop" aria-hidden="true"><img id="pimg" alt=""></div>
+<script>
+(function(){
+  var pop=document.getElementById("pop"),pimg=document.getElementById("pimg"),busy=false;
+  var pre=new Image();pre.src="/_nuked/fairs.gif";           // load it ahead so it appears instantly
+  document.getElementById("fairs").addEventListener("click",function(){
+    if(busy)return;busy=true;pimg.src="/_nuked/fairs.gif";pop.classList.add("on");pop.setAttribute("aria-hidden","false");
+    setTimeout(function(){pop.classList.remove("on");pop.setAttribute("aria-hidden","true");busy=false;},500);   // gone after half a second
+  });
+  var form=document.getElementById("bp"),code=document.getElementById("code"),err=document.getElementById("err");
+  form.addEventListener("submit",function(e){
+    e.preventDefault();err.textContent="";form.classList.remove("bad");
+    if(!code.value){err.textContent="Enter the bypass code.";return;}
+    fetch("/_nuked/bypass",{method:"POST",headers:{"Content-Type":"application/json"},credentials:"same-origin",body:JSON.stringify({code:code.value})})
+      .then(function(r){return r.json().catch(function(){return{}}).then(function(j){return{ok:r.ok,j:j}})})
+      .then(function(x){
+        if(x.ok){location.reload();return;}
+        err.textContent=x.j.error||"That's not the code.";void form.offsetWidth;form.classList.add("bad");code.select();
+      }).catch(function(){err.textContent="Couldn't reach the server."});
+  });
+})();
+</script>
+</body></html>`;
 
 const client = new Anthropic(); // reads ANTHROPIC_API_KEY
 const app = express();
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
+// the offline page's own helpers have to work while the site is off
+app.get("/_nuked/fairs.gif", (req, res) => {
+  if (!FAIRS_GIF) return res.status(404).end();
+  res.set({ "Content-Type": "image/gif", "Cache-Control": "public, max-age=86400" }).send(FAIRS_GIF);
+});
+app.post("/_nuked/bypass", express.json({ limit: "2kb" }), (req, res) => {
+  const o = req.get("origin");
+  if (o) { try { if (new URL(o).host !== req.get("host")) return res.status(403).json({ error: "Bad origin" }); } catch { return res.status(403).json({ error: "Bad origin" }); } }
+  if (!siteOff()) return res.json({ ok: true });
+  if (!BYPASS_CODE) return res.status(403).json({ error: "There's no bypass code set." });
+  if (limited("bp:" + req.ip, 8, 15 * 60e3)) return res.status(429).json({ error: "Too many tries. Wait a few minutes." });
+  const a = crypto.createHash("sha256").update(String(req.body?.code || "")).digest(), b = crypto.createHash("sha256").update(BYPASS_CODE).digest();
+  if (!crypto.timingSafeEqual(a, b)) return res.status(401).json({ error: "That's not the code." });
+  res.cookie(BYPASS_COOKIE, bypassToken(), { httpOnly: true, sameSite: "lax", secure: req.secure, maxAge: 12 * 60 * 60e3, path: "/" });
+  res.json({ ok: true });
+});
 app.use((req, res, next) => {
-  if (!siteOff()) return next();
-  res.status(503).set({ "Retry-After": "3600", "Cache-Control": "no-store" });
-  if (req.path.startsWith("/api")) return res.json({ error: "NEON AI is offline." });
+  if (!siteOff() || hasBypass(req)) return next();
+  res.status(503).set({ "Retry-After": "3600", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" });
+  if (req.path.startsWith("/api")) return res.json({ error: "NEON AI has been NUKED." });
   res.type("html").send(OFFLINE_HTML);
 });
 
