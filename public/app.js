@@ -81,16 +81,34 @@ async function api(path, opts = {}) {
 
 // ---------- auth screen ----------
 let mode = "login";
+let step = 1;
+function syncStep() {
+  authEls.btn.querySelector(".lbl").textContent = mode === "login" ? "Sign in" : step === 1 ? "Next" : "Create account";
+  document.querySelectorAll("#stepper i").forEach((d, i) => d.classList.toggle("on", i < step));
+  $("stepTxt").textContent = `Step ${step} of 2`;
+}
+function goStep(n) {
+  if (n === step) return;
+  const fwd = n > step, from = $("step" + step), to = $("step" + n);
+  step = n; syncStep(); authEls.err.textContent = "";
+  from.className = "step " + (fwd ? "out-fwd" : "out-back");
+  setTimeout(() => {
+    from.hidden = true; from.className = "step";
+    to.hidden = false; to.className = "step " + (fwd ? "in-fwd" : "in-back");
+    (n === 2 ? $("email") : authEls.user).focus({ preventScroll: true });
+  }, 250);
+}
+$("backBtn").onclick = () => goStep(1);
 const authEls = { form: $("authForm"), user: $("username"), pass: $("password"), err: $("authErr"), btn: $("authSubmit") };
 
 function setMode(m) {
   mode = m;
   document.querySelector(".tabs").dataset.mode = m;
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.mode === m));
-  authEls.btn.querySelector(".lbl").textContent = m === "login" ? "Sign in" : "Create account";
   authEls.pass.autocomplete = m === "login" ? "current-password" : "new-password";
   $("strength").hidden = m !== "signup";
-  $("emailRow").hidden = m !== "signup";
+  step = 1; $("step1").hidden = false; $("step2").hidden = true; $("step1").className = "step"; $("step2").className = "step";
+  $("stepper").hidden = m !== "signup"; syncStep();
   authEls.err.textContent = "";
   document.querySelectorAll(".field.bad").forEach((f) => f.classList.remove("bad"));
 }
@@ -129,23 +147,27 @@ authEls.form.onsubmit = async (e) => {
   e.preventDefault();
   const username = authEls.user.value.trim(), password = authEls.pass.value;
   if (!username) return fieldErr("fUser", "Enter a username.");
-  const email = $("email").value.trim();
-  if (mode === "signup" && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fieldErr("fEmail", "Enter a valid email address.");
   if (mode === "signup" && !/^[A-Za-z0-9_.-]{3,24}$/.test(username)) return fieldErr("fUser", "Username: 3-24 characters, letters, numbers, . _ -");
   if (!password) return fieldErr("fPass", "Enter your password.");
   if (mode === "signup" && password.length < 8) return fieldErr("fPass", "Password must be at least 8 characters.");
+  if (mode === "signup" && step === 1) { goStep(2); return; }
+  const email = $("email").value.trim();
+  if (mode === "signup" && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fieldErr("fEmail", "Enter a valid email address.");
   authEls.btn.classList.add("loading"); authEls.btn.disabled = true;
   try {
     const data = await api(mode === "login" ? "/api/login" : "/api/signup", {
       method: "POST", noAuthRedirect: true,
       body: { username, password, remember: $("remember").checked, email },
     });
-    authEls.pass.value = "";
+    authEls.pass.value = ""; $("email").value = "";
     await enterApp(data);
     if (mode === "signup") toast("Account created. Welcome aboard.");
   } catch (err) {
     const map = { email: "fEmail", username: "fUser", password: "fPass" };
-    if (map[err.field]) fieldErr(map[err.field], err.message);
+    if (map[err.field]) {
+      if (mode === "signup" && step === 2 && err.field !== "email") { goStep(1); setTimeout(() => fieldErr(map[err.field], err.message), 300); }
+      else fieldErr(map[err.field], err.message);
+    }
     else { authEls.err.textContent = err.message; if (err.status === 401) { const f = $("fPass"); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad"); } }
   } finally {
     authEls.btn.classList.remove("loading"); authEls.btn.disabled = false;
