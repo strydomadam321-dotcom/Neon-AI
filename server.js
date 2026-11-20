@@ -498,6 +498,10 @@ app.post("/api/signup/verify", small, wrap(async (req, res) => {
 
 // ---------- Google sign-in (authorization-code flow) ----------
 const GCOOKIE = "neon_gs";
+// A password typed before "Continue with Google" waits in the database for at most 10 minutes, encrypted. It is hashed only if a new account is actually created.
+const sealKey = () => crypto.createHash("sha256").update("pending:" + GOOGLE_SECRET).digest();
+function sealPw(pw) { const iv = crypto.randomBytes(12), c = crypto.createCipheriv("aes-256-gcm", sealKey(), iv); const enc = Buffer.concat([c.update(pw, "utf8"), c.final()]); return "enc:" + Buffer.concat([iv, c.getAuthTag(), enc]).toString("base64"); }
+function openPw(v) { const b = Buffer.from(String(v).slice(4), "base64"), d = crypto.createDecipheriv("aes-256-gcm", sealKey(), b.subarray(0, 12)); d.setAuthTag(b.subarray(12, 28)); return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString("utf8"); }
 const googleRedirectUri = (req) => process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
 const authFail = (res, msg) => res.redirect("/?auth_error=" + encodeURIComponent(msg));
 const isHttps = (u) => typeof u === "string" && /^https:\/\/[^\s]{1,500}$/.test(u);
@@ -512,7 +516,7 @@ app.post("/api/auth/google/start", small, wrap(async (req, res) => {
     const bad = checkSignupFields({ username, password, email: "x@x.xx" });
     if (bad) return res.status(400).json(bad);
     if ((await q("select 1 from users where username_lc = $1", [username.toLowerCase()])).rows[0]) return res.status(409).json({ error: "That username is taken.", field: "username" });
-    name = username; hash = await bcrypt.hash(password, 11);
+    name = username; hash = sealPw(password);
   }
   const state = crypto.randomBytes(24).toString("base64url");
   await q("delete from google_pending where expires_at < now()");
@@ -560,7 +564,9 @@ app.get("/api/auth/google/callback", wrap(async (req, res) => {
     // new account: the username they typed in the sign-up form (if it's still free), otherwise one made from their email
     const base = usernameFromEmail(email);
     const wanted = pend.username && !(await q("select 1 from users where username_lc = $1", [pend.username.toLowerCase()])).rows[0] ? pend.username : null;
-    const hash = pend.pass_hash || await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);   // no password typed: nobody knows this one, they use Google
+    let hash;
+    try { hash = pend.pass_hash ? await bcrypt.hash(openPw(pend.pass_hash), 11) : await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10); }   // no password typed: nobody knows this one, they use Google
+    catch { return authFail(res, "Google sign-in expired. Please try again."); }
     for (let i = 0; i < 25 && !user; i++) {
       const name = i === 0 ? (wanted || base) : i === 1 && wanted ? base : base.slice(0, 19) + String(crypto.randomInt(10, 9999));
       try {

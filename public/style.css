@@ -821,3 +821,6 @@ body.in-app .rs-dim { opacity: 1; }
 /* closed sections can't be focused or read by screen readers once they've finished collapsing */
 .collapse:not(.open) .collapse-in { visibility: hidden; transition: visibility 0s .6s; }
 .collapse.open .collapse-in { visibility: visible; transition: none; }
+
+.gbar.busy { cursor: progress; }
+.gbar.busy::after { content: ""; width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(32, 33, 36, .18); border-top-color: #4285f4; animation: rot .7s linear infinite; }

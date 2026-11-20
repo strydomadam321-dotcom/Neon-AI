@@ -188,18 +188,27 @@ $("resendBtn2").onclick = async () => {
   } catch (e) { authEls.err.textContent = e.message; }
   finally { $("resendBtn2").disabled = false; }
 };
+let googleWatch = 0;
+function googleBusy(on) {
+  clearTimeout(googleWatch);
+  [$("googleBtn"), $("googleBtn2")].forEach((x) => {
+    x.disabled = on; x.classList.toggle("busy", on);
+    const t = x.querySelector("span"); if (t) t.textContent = on ? "Opening Google…" : "Continue with Google";
+  });
+  if (on) googleWatch = setTimeout(() => { googleBusy(false); toast("Google is taking too long. Please try again.", "err"); }, 12000);   // never leave the button stuck
+}
 async function googleGo() {
   if (!config.hasGoogle) { toast("Google sign-in isn't set up yet.", "err"); return; }
-  const btns = [$("googleBtn"), $("googleBtn2")]; btns.forEach((x) => (x.disabled = true));
+  googleBusy(true);
   try {
     const body = { remember: $("remember").checked };
     if (mode === "signup") { body.username = authEls.user.value.trim(); body.password = authEls.pass.value; }   // the username they chose is kept
     const d = await api("/api/auth/google/start", { method: "POST", noAuthRedirect: true, body });
     location.href = d.url;
   } catch (err) {
-    btns.forEach((x) => (x.disabled = false));
+    googleBusy(false);
     if (err.field === "username" || err.field === "password") { goStep(1); setTimeout(() => fieldErr(err.field === "username" ? "fUser" : "fPass", err.message), 300); }
-    else toast(err.message, "err");
+    else toast(err.message || "Couldn't open Google. Please try again.", "err");
   }
 }
 function paintAvatar(el, name, pic) {
@@ -227,7 +236,7 @@ function setMode(m, instant) {
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => { if (t.dataset.mode !== mode) setMode(t.dataset.mode); }));
 
 $("googleBtn").onclick = googleGo; $("googleBtn2").onclick = googleGo;
-addEventListener("pageshow", (e) => { if (e.persisted) [$("googleBtn"), $("googleBtn2")].forEach((x) => (x.disabled = false)); });   // coming back from Google with the Back button
+addEventListener("pageshow", (e) => { if (e.persisted) googleBusy(false); });   // coming back from Google with the Back button
 $("togglePw").onclick = () => {
   const show = authEls.pass.type === "password";
   authEls.pass.type = show ? "text" : "password";
