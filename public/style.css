@@ -809,3 +809,6 @@ body.in-app .rs-dim { opacity: 1; }
 .g-wrap { padding-top: 14px; }
 .g-wrap .gbar { margin-bottom: 0; }
 @media (max-width: 380px) { .otp { gap: 6px; } .otp-i { height: 52px; font-size: 21px; } }
+
+.avatar.has-pic { background: none; padding: 0; overflow: hidden; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }

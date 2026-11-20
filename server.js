@@ -85,6 +85,14 @@ const pool = new pg.Pool({
 });
 const q = (text, params) => pool.query(text, params);
 
+// one canonical form per mailbox, so jane@gmail.com, j.a.n.e@gmail.com and jane+x@gmail.com count as the same email
+function normEmail(e) {
+  let [l, d] = String(e).trim().toLowerCase().split("@");
+  if (d === "googlemail.com") d = "gmail.com";
+  if (d === "gmail.com") l = l.split("+")[0].replace(/\./g, "");
+  return `${l}@${d}`;
+}
+
 await q(`
 create table if not exists users(
   id serial primary key,
@@ -121,6 +129,15 @@ alter table users add column if not exists email_verified boolean not null defau
 alter table users add column if not exists google_sub text;
 alter table users add column if not exists has_password boolean not null default true;
 create unique index if not exists users_google_uq on users(google_sub);
+alter table users add column if not exists email_norm text;
+alter table users add column if not exists avatar text;
+create table if not exists google_pending(
+  state text primary key,
+  username text,
+  pass_hash text,
+  remember boolean not null default false,
+  expires_at timestamptz not null
+);
 create table if not exists signup_pending(
   email text primary key,
   username text not null,
@@ -144,6 +161,14 @@ create table if not exists meta(key text primary key, done_at timestamptz not nu
 {
   const r = await q("insert into meta(key) values('reset-2026-11-plans') on conflict do nothing returning key");
   if (r.rowCount) { await q("truncate users restart identity cascade"); console.log("One-time reset done: all accounts and chats removed."); }
+}
+// every account gets a canonical email; two accounts can never share one (or a username, or a Google account)
+for (const r of (await q("select id,email from users where email is not null and email_norm is null")).rows) await q("update users set email_norm=$1 where id=$2", [normEmail(r.email), r.id]);
+try { await q("create unique index if not exists users_email_norm_uq on users(email_norm)"); }
+catch (e) { console.warn("users_email_norm_uq not created (duplicate emails exist):", e.message); }
+{
+  const r = await q("insert into meta(key) values('rm-user-strydomadam321') on conflict do nothing returning key");
+  if (r.rowCount) { const d = await q("delete from users where username_lc = 'strydomadam321' or email_norm = 'strydomadam321@gmail.com'"); console.log(`Housekeeping: removed account strydomadam321 (${d.rowCount} found)`); }
 }
 // one-time housekeeping: remove a test account (its chats, sessions and usage go with it). Runs once, then never again.
 {
@@ -205,7 +230,7 @@ const requireAuth = wrap(async (req, res, next) => {
   const token = getCookie(req, COOKIE);
   if (!token) return res.status(401).json({ error: "Not signed in" });
   const { rows } = await q(
-    `select u.id, u.username, u.settings, u.plan, u.plan_requested, u.has_password from sessions s join users u on u.id = s.user_id
+    `select u.id, u.username, u.settings, u.plan, u.plan_requested, u.has_password, u.avatar from sessions s join users u on u.id = s.user_id
      where s.token_hash = $1 and s.expires_at > now()`, [sha(token)]);
   if (!rows[0]) { res.clearCookie(COOKIE, { path: "/" }); return res.status(401).json({ error: "Session expired" }); }
   req.user = rows[0]; req.token = token;
@@ -267,7 +292,7 @@ app.post("/api/signup/start", small, wrap(async (req, res) => {
   if (!MAIL_READY) return res.status(503).json({ error: "Email sign-up isn't available yet. Try Continue with Google instead.", field: "email" });
   const { username, password } = req.body, em = req.body.email.trim().toLowerCase();
   if (limited("smail:" + em, 5, 60 * 60e3)) return res.status(429).json({ error: "Too many codes sent to that email. Try again in an hour.", field: "email" });
-  const { rows: dup } = await q("select username_lc = $1 as u, email = $2 as e from users where username_lc = $1 or email = $2", [username.toLowerCase(), em]);
+  const { rows: dup } = await q("select username_lc = $1 as u, email_norm = $2 as e from users where username_lc = $1 or email_norm = $2", [username.toLowerCase(), normEmail(em)]);
   if (dup.some((r) => r.e)) return res.status(409).json({ error: "That email already has an account. Sign in instead.", field: "email" });
   if (dup.some((r) => r.u)) return res.status(409).json({ error: "That username is taken.", field: "username" });
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
@@ -315,8 +340,8 @@ app.post("/api/signup/verify", small, wrap(async (req, res) => {
   }
   let user;
   try {
-    ({ rows: [user] } = await q("insert into users(username,username_lc,pass_hash,email,email_verified) values($1,$2,$3,$4,true) returning id,username,settings,plan,plan_requested,has_password",
-      [p.username, p.username_lc, p.pass_hash, em]));
+    ({ rows: [user] } = await q("insert into users(username,username_lc,pass_hash,email,email_norm,email_verified) values($1,$2,$3,$4,$5,true) returning id,username,settings,plan,plan_requested,has_password,avatar",
+      [p.username, p.username_lc, p.pass_hash, em, normEmail(em)]));
   } catch (e) {
     if (e.code === "23505") return /email/.test(e.constraint || "") ? res.status(409).json({ error: "That email already has an account. Sign in instead.", field: "email" }) : res.status(409).json({ error: "That username was just taken. Pick another.", field: "username" });
     throw e;
@@ -330,16 +355,28 @@ app.post("/api/signup/verify", small, wrap(async (req, res) => {
 const GCOOKIE = "neon_gs";
 const googleRedirectUri = (req) => process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
 const authFail = (res, msg) => res.redirect("/?auth_error=" + encodeURIComponent(msg));
+const isHttps = (u) => typeof u === "string" && /^https:\/\/[^\s]{1,500}$/.test(u);
 
-app.get("/api/auth/google", (req, res) => {
-  if (!GOOGLE_ID || !GOOGLE_SECRET) return authFail(res, "Google sign-in isn't set up yet.");
-  if (limited("gstart:" + req.ip, 30, 60 * 60e3)) return authFail(res, "Too many attempts. Try again later.");
-  const state = crypto.randomBytes(24).toString("base64url"), remember = req.query.remember === "1" ? "1" : "0";
-  res.cookie(GCOOKIE, `${state}.${remember}`, { httpOnly: true, sameSite: "lax", secure: req.secure, maxAge: 10 * 60e3, path: "/api/auth" });
+// The page asks for the Google link with a POST, so a username and password chosen in the sign-up form travel safely (never in a URL)
+app.post("/api/auth/google/start", small, wrap(async (req, res) => {
+  if (!GOOGLE_ID || !GOOGLE_SECRET) return res.status(503).json({ error: "Google sign-in isn't set up yet." });
+  if (limited("gstart:" + req.ip, 30, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
+  const { username, password, remember } = req.body || {};
+  let name = null, hash = null;
+  if (username !== undefined || password !== undefined) {   // creating an account: they picked a username and password first
+    const bad = checkSignupFields({ username, password, email: "x@x.xx" });
+    if (bad) return res.status(400).json(bad);
+    if ((await q("select 1 from users where username_lc = $1", [username.toLowerCase()])).rows[0]) return res.status(409).json({ error: "That username is taken.", field: "username" });
+    name = username; hash = await bcrypt.hash(password, 11);
+  }
+  const state = crypto.randomBytes(24).toString("base64url");
+  await q("delete from google_pending where expires_at < now()");
+  await q("insert into google_pending(state,username,pass_hash,remember,expires_at) values($1,$2,$3,$4,$5)", [state, name, hash, !!remember, new Date(Date.now() + 10 * 60e3)]);
+  res.cookie(GCOOKIE, state, { httpOnly: true, sameSite: "lax", secure: req.secure, maxAge: 10 * 60e3, path: "/api/auth" });
   const u = new URL(GOOGLE_AUTH_URL);
   u.search = new URLSearchParams({ client_id: GOOGLE_ID, redirect_uri: googleRedirectUri(req), response_type: "code", scope: "openid email profile", state, prompt: "select_account" }).toString();
-  res.redirect(u.toString());
-});
+  res.json({ url: u.toString() });
+}));
 
 function usernameFromEmail(email) {
   let base = email.split("@")[0].replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 18);
@@ -348,10 +385,11 @@ function usernameFromEmail(email) {
 }
 
 app.get("/api/auth/google/callback", wrap(async (req, res) => {
-  const [st, remember] = getCookie(req, GCOOKIE).split(".");
+  const st = getCookie(req, GCOOKIE);
   res.clearCookie(GCOOKIE, { path: "/api/auth" });
-  if (req.query.error) return authFail(res, "Google sign-in was cancelled.");
-  if (!GOOGLE_ID || !GOOGLE_SECRET || !st || st !== String(req.query.state || "") || !req.query.code) return authFail(res, "Google sign-in expired. Please try again.");
+  if (req.query.error) { if (st) await q("delete from google_pending where state = $1", [st]); return authFail(res, "Google sign-in was cancelled."); }
+  const pend = st && st === String(req.query.state || "") ? (await q("delete from google_pending where state = $1 returning *", [st])).rows[0] : null;
+  if (!GOOGLE_ID || !GOOGLE_SECRET || !pend || new Date(pend.expires_at) < new Date() || !req.query.code) return authFail(res, "Google sign-in expired. Please try again.");
   let claims;
   try {
     const r = await fetch(GOOGLE_TOKEN_URL, {
@@ -366,23 +404,31 @@ app.get("/api/auth/google/callback", wrap(async (req, res) => {
   const okIss = claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com";
   const verified = claims.email_verified === true || claims.email_verified === "true";
   if (!okIss || claims.aud !== GOOGLE_ID || !(claims.exp * 1000 > Date.now()) || !claims.sub || !claims.email || !verified) return authFail(res, "Google couldn't verify that account.");
-  const email = String(claims.email).toLowerCase(), sub = String(claims.sub);
-  const cols = "id,username,settings,plan,plan_requested,has_password";
+  const email = String(claims.email).toLowerCase(), enorm = normEmail(email), sub = String(claims.sub), pic = isHttps(claims.picture) ? claims.picture : null;
+  const cols = "id,username,settings,plan,plan_requested,has_password,avatar";
   let user = (await q(`select ${cols} from users where google_sub = $1`, [sub])).rows[0], created = false;
-  if (!user) user = (await q(`update users set google_sub = $1, email_verified = true where email = $2 and google_sub is null returning ${cols}`, [sub, email])).rows[0]; // same email: link
-  if (!user) {
-    const hash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10); // nobody knows this password; they sign in with Google
+  if (!user) user = (await q(`update users set google_sub = $1, email_verified = true where email_norm = $2 and google_sub is null returning ${cols}`, [sub, enorm])).rows[0]; // same mailbox: link to that account
+  if (user) { if (pic && pic !== user.avatar) await q("update users set avatar = $1 where id = $2", [pic, user.id]); }
+  else {
+    // new account: the username they typed in the sign-up form (if it's still free), otherwise one made from their email
     const base = usernameFromEmail(email);
+    const wanted = pend.username && !(await q("select 1 from users where username_lc = $1", [pend.username.toLowerCase()])).rows[0] ? pend.username : null;
+    const hash = pend.pass_hash || await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);   // no password typed: nobody knows this one, they use Google
     for (let i = 0; i < 25 && !user; i++) {
-      const name = i === 0 ? base : base.slice(0, 19) + String(crypto.randomInt(10, 9999));
+      const name = i === 0 ? (wanted || base) : i === 1 && wanted ? base : base.slice(0, 19) + String(crypto.randomInt(10, 9999));
       try {
-        user = (await q(`insert into users(username,username_lc,pass_hash,email,email_verified,google_sub,has_password) values($1,$2,$3,$4,true,$5,false) returning ${cols}`, [name, name.toLowerCase(), hash, email, sub])).rows[0];
+        user = (await q(`insert into users(username,username_lc,pass_hash,email,email_norm,email_verified,google_sub,has_password,avatar) values($1,$2,$3,$4,$5,true,$6,$7,$8) returning ${cols}`,
+          [name, name.toLowerCase(), hash, email, enorm, sub, !!pend.pass_hash, pic])).rows[0];
         created = true;
-      } catch (e) { if (e.code !== "23505") throw e; if (/email|google/.test(e.constraint || "")) return authFail(res, "That Google account is already linked. Try signing in again."); }
+      } catch (e) {
+        if (e.code !== "23505") throw e;
+        if (/google/.test(e.constraint || "")) { user = (await q(`select ${cols} from users where google_sub = $1`, [sub])).rows[0]; break; }   // double-click race: they already exist
+        if (/email/.test(e.constraint || "")) return authFail(res, "That email already has an account. Sign in with your username and password.");
+      }
     }
     if (!user) return authFail(res, "Couldn't create your account. Please try again.");
   }
-  await startSession(req, res, user.id, remember === "1");
+  await startSession(req, res, user.id, !!pend.remember);
   res.redirect(created ? "/?welcome=1" : "/");
 }));
 
@@ -391,7 +437,7 @@ app.post("/api/login", small, wrap(async (req, res) => {
   if (typeof username !== "string" || typeof password !== "string") return res.status(400).json({ error: "Enter your username and password." });
   const key = "login:" + req.ip + ":" + username.toLowerCase();
   if (limited(key, 8, 15 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again in a few minutes." });
-  const { rows } = await q("select id,username,pass_hash,settings,plan,plan_requested,has_password from users where username_lc = $1", [username.toLowerCase()]);
+  const { rows } = await q("select id,username,pass_hash,settings,plan,plan_requested,has_password,avatar from users where username_lc = $1", [username.toLowerCase()]);
   const user = rows[0];
   const ok = await bcrypt.compare(password.slice(0, 200), user ? user.pass_hash : DUMMY_HASH);
   if (!user || !ok) return res.status(401).json({ error: "Wrong username or password." });
@@ -414,7 +460,7 @@ async function todayUsage(userId) {
 async function mePayload(u) {
   const plan = effectivePlan(u), use = await todayUsage(u.id);
   return {
-    user: { username: u.username, hasPassword: u.has_password !== false }, settings: u.settings,
+    user: { username: u.username, hasPassword: u.has_password !== false, picture: u.avatar || null }, settings: u.settings,
     plan: { id: plan, requested: u.plan_requested && u.plan_requested !== plan ? u.plan_requested : null, owner: OWNERS.has(u.username.toLowerCase()), usedTokens: use.gemini, usedClaude: use.claude },
   };
 }

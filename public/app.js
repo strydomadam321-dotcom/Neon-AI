@@ -167,9 +167,26 @@ $("resendBtn").onclick = async () => {
   } catch (e) { authEls.err.textContent = e.message; }
   finally { $("resendBtn").disabled = false; }
 };
-function googleGo() {
+async function googleGo() {
   if (!config.hasGoogle) { toast("Google sign-in isn't set up yet.", "err"); return; }
-  location.href = "/api/auth/google?remember=" + ($("remember").checked ? 1 : 0);
+  const btns = [$("googleBtn"), $("googleBtn2")]; btns.forEach((x) => (x.disabled = true));
+  try {
+    const body = { remember: $("remember").checked };
+    if (mode === "signup") { body.username = authEls.user.value.trim(); body.password = authEls.pass.value; }   // the username they chose is kept
+    const d = await api("/api/auth/google/start", { method: "POST", noAuthRedirect: true, body });
+    location.href = d.url;
+  } catch (err) {
+    btns.forEach((x) => (x.disabled = false));
+    if (err.field === "username" || err.field === "password") { goStep(1); setTimeout(() => fieldErr(err.field === "username" ? "fUser" : "fPass", err.message), 300); }
+    else toast(err.message, "err");
+  }
+}
+function paintAvatar(el, name, pic) {
+  el.textContent = ""; el.classList.remove("has-pic");
+  const letter = () => { el.textContent = (name || "?")[0]; el.classList.remove("has-pic"); };
+  if (!pic) { letter(); return; }
+  const im = new Image(); im.alt = ""; im.referrerPolicy = "no-referrer"; im.onerror = () => { im.remove(); letter(); }; im.src = pic;
+  el.appendChild(im); el.classList.add("has-pic");
 }
 const authEls = { form: $("authForm"), user: $("username"), pass: $("password"), err: $("authErr"), btn: $("authSubmit") };
 
@@ -459,7 +476,7 @@ function msgEl(m, idx, chat = current) {
   row.className = "msg " + m.role;
   const av = document.createElement("div");
   av.className = "avatar";
-  if (m.role === "user") av.textContent = (user?.username || "U")[0]; else av.innerHTML = icon("bolt");
+  if (m.role === "user") paintAvatar(av, user?.username || "U", user?.picture); else av.innerHTML = icon("bolt");
   const body = document.createElement("div");
   body.className = "body";
   const bubble = document.createElement("div");
@@ -1155,8 +1172,8 @@ addEventListener("focus", syncNow);
 async function enterApp(data) {
   user = data.user; plan = data.plan || plan; settings = { system: "", model: "", effort: config.defaultEffort ?? 1, retro: true, bg: true, flicker: true, ...(data.settings || {}), gfx: readLook().gfx === "gpu" ? "gpu" : "cpu" };
   $("auth").classList.add("hidden"); $("app").classList.remove("hidden"); document.body.classList.add("in-app"); applyLook();
-  $("meName").textContent = user.username; $("meAvatar").textContent = user.username[0];
-  $("setName").textContent = user.username; $("setAvatar").textContent = user.username[0];
+  $("meName").textContent = user.username; paintAvatar($("meAvatar"), user.username, user.picture);
+  $("setName").textContent = user.username; paintAvatar($("setAvatar"), user.username, user.picture);
   els.model.innerHTML = "";
   config.models.forEach((m) => { const o = new Option(m.name, m.id); o.dataset.provider = m.provider; els.model.add(o); });
   const okModel = (id) => config.models.some((m) => m.id === id) && !modelLocked(id);
