@@ -19,7 +19,6 @@ const ls = {
 let config = { models: [], defaultModel: "", plans: [], freeTokens: 50000, plusClaudeMsgs: 50, hasKey: true, hasGemini: false, defaultEffort: 1 };
 let user = null;
 let plan = { id: "free", requested: null, owner: false, usedTokens: 0, usedClaude: 0 };
-let signupPlan = "free";
 const readLook = () => { try { return JSON.parse(localStorage.getItem("neon-look") || "{}") || {}; } catch { return {}; } };
 let settings = { system: "", model: "", effort: 1, retro: false, bg: true, flicker: true, gfx: readLook().gfx === "gpu" ? "gpu" : "cpu" };
 let chats = [];          // metadata list for the sidebar: {id,title,model,created,updated}
@@ -91,13 +90,13 @@ function setMode(m) {
   authEls.btn.querySelector(".lbl").textContent = m === "login" ? "Sign in" : "Create account";
   authEls.pass.autocomplete = m === "login" ? "current-password" : "new-password";
   $("strength").hidden = m !== "signup";
-  $("planPick").hidden = m !== "signup";
-  if (m === "signup") renderPlanGrid($("planGrid"), { pick: true });
+  $("emailRow").hidden = m !== "signup";
   authEls.err.textContent = "";
   document.querySelectorAll(".field.bad").forEach((f) => f.classList.remove("bad"));
 }
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => setMode(t.dataset.mode)));
 
+$("googleBtn").onclick = () => toast("Google sign-up is coming soon.");
 $("togglePw").onclick = () => {
   const show = authEls.pass.type === "password";
   authEls.pass.type = show ? "text" : "password";
@@ -124,12 +123,14 @@ function fieldErr(id, msg) {
   const f = $(id); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad");
   f.querySelector("input")?.focus();
 }
-["username", "password"].forEach((id) => $(id).addEventListener("input", () => { $(id).closest(".field").classList.remove("bad"); authEls.err.textContent = ""; }));
+["email", "username", "password"].forEach((id) => $(id).addEventListener("input", () => { $(id).closest(".field").classList.remove("bad"); authEls.err.textContent = ""; }));
 
 authEls.form.onsubmit = async (e) => {
   e.preventDefault();
   const username = authEls.user.value.trim(), password = authEls.pass.value;
   if (!username) return fieldErr("fUser", "Enter a username.");
+  const email = $("email").value.trim();
+  if (mode === "signup" && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fieldErr("fEmail", "Enter a valid email address.");
   if (mode === "signup" && !/^[A-Za-z0-9_.-]{3,24}$/.test(username)) return fieldErr("fUser", "Username: 3-24 characters, letters, numbers, . _ -");
   if (!password) return fieldErr("fPass", "Enter your password.");
   if (mode === "signup" && password.length < 8) return fieldErr("fPass", "Password must be at least 8 characters.");
@@ -137,13 +138,13 @@ authEls.form.onsubmit = async (e) => {
   try {
     const data = await api(mode === "login" ? "/api/login" : "/api/signup", {
       method: "POST", noAuthRedirect: true,
-      body: { username, password, remember: $("remember").checked, plan: signupPlan },
+      body: { username, password, remember: $("remember").checked, email },
     });
     authEls.pass.value = "";
     await enterApp(data);
-    if (mode === "signup") toast(signupPlan === "free" ? "Account created. Welcome aboard." : "Account created on Free. We'll switch on your plan when payments open.");
+    if (mode === "signup") toast("Account created. Welcome aboard.");
   } catch (err) {
-    const map = { username: "fUser", password: "fPass" };
+    const map = { email: "fEmail", username: "fUser", password: "fPass" };
     if (map[err.field]) fieldErr(map[err.field], err.message);
     else { authEls.err.textContent = err.message; if (err.status === 401) { const f = $("fPass"); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad"); } }
   } finally {
@@ -166,8 +167,8 @@ function showAuth(msg = "") {
 
 // ---------- plans ----------
 const PLAN_COPY = {
-  free: { badge: "", feats: ["50,000 Gemini tokens a day", "Gemini 3.5 Flash-Lite and 2.5 Flash", "Chats synced on every device", "Images, PDFs, Word and PowerPoint"], off: ["Claude models"], support: "Community support" },
-  spark: { badge: "", feats: ["Unlimited Gemini, no daily cap", "Gemini 3.5 Flash-Lite and 2.5 Flash", "Chats synced on every device", "Images, PDFs, Word and PowerPoint"], off: ["Claude models"], support: "Email support" },
+  free: { badge: "", feats: ["50,000 Gemini tokens a day", "Gemini 3.5 Flash-Lite and 2.5 Flash", "Chats synced on every device", "Images, PDFs, Word and PowerPoint"], off: [], support: "Community support" },
+  spark: { badge: "", feats: ["Unlimited Gemini, no daily cap", "Gemini 3.5 Flash-Lite and 2.5 Flash", "Chats synced on every device", "Images, PDFs, Word and PowerPoint"], off: [], support: "Email support" },
   plus: { badge: "Popular", feats: ["Everything in Spark", "Claude Sonnet and Haiku", "Fair use: 50 Claude messages a day", "Unlimited Gemini"], off: [], support: "Priority email support" },
   max: { badge: "Best value", feats: ["Everything in Plus", "Claude Opus, the smartest model", "No limit on Claude messages", "Early access to new features"], off: [], support: "Priority support, answered first" },
 };
@@ -176,9 +177,8 @@ function planCardHTML(p, opts) {
   const c = PLAN_COPY[p.id] || { feats: [], off: [] };
   const price = p.price === 0 ? "Free" : "A$" + p.price;
   const cur = opts.current === p.id;
-  const sel = opts.pick && signupPlan === p.id;
-  const cta = opts.pick ? (sel ? "Selected" : "Select") : cur ? "Your plan" : p.price === 0 ? "Included" : (plan.requested === p.id ? "Requested" : "Choose plan");
-  return `<button type="button" class="plan${cur ? " current" : ""}" data-id="${p.id}" role="${opts.pick ? "radio" : "button"}" ${opts.pick ? `aria-checked="${sel}"` : ""}>
+  const cta = cur ? "Your plan" : p.price === 0 ? "Included" : (plan.requested === p.id ? "Requested" : "Choose plan");
+  return `<button type="button" class="plan${cur ? " current" : ""}" data-id="${p.id}" role="button">
     ${c.badge ? `<span class="badge">${c.badge}</span>` : ""}
     <span class="pname">${p.name}</span><span class="ptag">${p.tag}</span>
     <span class="price"><b>${price}</b>${p.price ? "<span>/ month</span>" : "<span>forever</span>"}</span>
@@ -189,7 +189,6 @@ function renderPlanGrid(box, opts = {}) {
   box.innerHTML = (config.plans || []).map((p) => planCardHTML(p, opts)).join("");
   box.querySelectorAll(".plan").forEach((b) => (b.onclick = () => {
     const id = b.dataset.id;
-    if (opts.pick) { signupPlan = id; renderPlanGrid(box, opts); return; }
     choosePlan(id);
   }));
 }

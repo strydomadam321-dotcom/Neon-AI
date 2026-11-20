@@ -711,7 +711,6 @@ body.in-app .rs-dim { opacity: 1; }
 
 /* ---------- plans ---------- */
 .auth-card { transition: width .35s cubic-bezier(.3, 1, .4, 1); }
-.auth-card:has(.tabs[data-mode="signup"]) { width: min(920px, 100%); }
 .auth-card .tabs, .auth-card #authForm, .auth-card .auth-sub { max-width: 420px; margin-left: auto; margin-right: auto; }
 .auth-card .tabs { margin-bottom: 18px; }
 .plan-pick { margin: 0 0 22px; }
@@ -752,5 +751,14 @@ body.in-app .rs-dim { opacity: 1; }
 .dd-item.locked { opacity: .55; }
 .dd-item .lockTag { margin-left: auto; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--vio); padding: 2px 7px; border: 1px solid rgba(var(--a3), .5); border-radius: 99px; }
 @media (max-width: 880px) { .plan-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 520px) { .plan-grid { grid-template-columns: 1fr; } .auth-card:has(.tabs[data-mode="signup"]) { width: 100%; } }
+@media (max-width: 520px) { .plan-grid { grid-template-columns: 1fr; } }
 #seePlans { white-space: nowrap; flex: none; }
+
+.email-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.email-row .field { flex: 1; min-width: 0; margin-bottom: 0; }
+.email-row .or { color: var(--faint); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+.gbtn { flex: none; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 12px; cursor: pointer; background: #fff; border: 1px solid var(--line2); transition: transform .2s, box-shadow .25s; }
+.gbtn svg { width: 22px; height: 22px; }
+.gbtn:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(255, 255, 255, .18), 0 0 18px rgba(var(--a1), .35); }
+.gbtn:active { transform: scale(.95); }
+.email-row[hidden] { display: none; }

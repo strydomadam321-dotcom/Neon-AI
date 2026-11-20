@@ -59,11 +59,10 @@ other computer instead: `scp -r Neon-AI YOUR_USERNAME@192.168.1.42:~`.
 sudo bash Neon-AI/deploy/setup-ubuntu.sh
 ```
 
-It asks for three things (press Enter to skip any):
+It asks for two things (press Enter to skip any):
 
 - your **Anthropic API key**
 - your **Gemini API key**
-- your own **username** (optional) to keep full access with no limits
 
 Then it installs everything, starts NEON AI, and prints the address to open, for example `http://192.168.1.42:3000`,
 from any phone or computer on the same Wi-Fi.

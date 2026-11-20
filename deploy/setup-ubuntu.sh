@@ -84,7 +84,6 @@ else
   say "First-time settings (press Enter to skip any you don't have yet)"
   ask ANTHROPIC_API_KEY "Anthropic API key (Claude)" 1
   ask GEMINI_API_KEY    "Gemini API key (Google AI Studio)" 1
-  ask OWNER_USERNAMES   "Your own username(s) for full free access, comma separated (optional)" 0
   DB_PASS="$(openssl rand -hex 24)"
 
   say "Creating the database"
@@ -108,7 +107,6 @@ else
       echo "DATABASE_URL=$(quote "postgres://$DB_USER:$DB_PASS@127.0.0.1:5432/$DB_NAME")"
       echo "ANTHROPIC_API_KEY=$(quote "${ANTHROPIC_API_KEY:-}")"
       echo "GEMINI_API_KEY=$(quote "${GEMINI_API_KEY:-}")"
-      echo "OWNER_USERNAMES=$(quote "${OWNER_USERNAMES:-}")"
     } > "$ENV_FILE" )
   if [ "$DRY" = 0 ]; then chown root:"$APP_USER" "$ENV_FILE" 2>/dev/null || true; chmod 640 "$ENV_FILE"; fi
 fi

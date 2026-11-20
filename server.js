@@ -101,6 +101,8 @@ create table if not exists chats(
 create index if not exists chats_user_updated on chats(user_id, updated_at desc);
 alter table users add column if not exists plan text not null default 'free';
 alter table users add column if not exists plan_requested text;
+alter table users add column if not exists email text;
+create unique index if not exists users_email_uq on users(email);
 create table if not exists usage(
   user_id int not null references users(id) on delete cascade,
   day date not null default current_date,
@@ -199,7 +201,9 @@ const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", 10);
 
 app.post("/api/signup", small, wrap(async (req, res) => {
   if (limited("signup:" + req.ip, 8, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
-  const { username, password, remember, plan } = req.body || {};
+  const { username, password, remember, email } = req.body || {};
+  const emailOk = typeof email === "string" && email.length <= 120 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
+  if (!emailOk) return res.status(400).json({ error: "Enter a valid email address.", field: "email" });
   if (typeof username !== "string" || !USER_RE.test(username))
     return res.status(400).json({ error: "Username must be 3-24 characters: letters, numbers, . _ -", field: "username" });
   if (typeof password !== "string" || password.length < 8)
@@ -209,10 +213,10 @@ app.post("/api/signup", small, wrap(async (req, res) => {
   const hash = await bcrypt.hash(password, 11);
   let user;
   try {
-    ({ rows: [user] } = await q("insert into users(username,username_lc,pass_hash,plan_requested) values($1,$2,$3,$4) returning id,username,settings,plan,plan_requested",
-      [username, username.toLowerCase(), hash, PLAN_IDS.includes(plan) && plan !== "free" ? plan : null]));
+    ({ rows: [user] } = await q("insert into users(username,username_lc,pass_hash,email) values($1,$2,$3,$4) returning id,username,settings,plan,plan_requested",
+      [username, username.toLowerCase(), hash, email.trim().toLowerCase()]));
   } catch (e) {
-    if (e.code === "23505") return res.status(409).json({ error: "That username is taken.", field: "username" });
+    if (e.code === "23505") return /email/.test(e.constraint || "") ? res.status(409).json({ error: "That email already has an account.", field: "email" }) : res.status(409).json({ error: "That username is taken.", field: "username" });
     throw e;
   }
   await startSession(req, res, user.id, !!remember);
