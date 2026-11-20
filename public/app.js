@@ -125,6 +125,36 @@ $("backBtn3").onclick = () => { clearInterval(timers[""]); goStep(2); };
 $("backBtn4").onclick = () => goStep(1);
 $("backBtn5").onclick = () => { clearInterval(timers["2"]); goStep(4); };
 
+// ---------- Terms of Service / Privacy Policy viewer ----------
+const legalCache = {};
+let legalDoc = "";
+async function showLegal(doc) {
+  if (!["terms", "privacy"].includes(doc)) return;
+  const ov = $("legal"), body = $("legalBody"), tabs = ov.querySelector(".legal-tabs");
+  tabs.dataset.t = doc; tabs.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.t === doc));
+  $("legalOpen").href = "/" + doc;
+  const first = ov.classList.contains("hidden");
+  if (first) { body.innerHTML = ""; ov.classList.remove("hidden"); }
+  else if (legalDoc !== doc) { body.classList.add("swap"); await new Promise((r) => setTimeout(r, 180)); }
+  legalDoc = doc;
+  try {
+    if (!legalCache[doc]) legalCache[doc] = await (await fetch("/api/legal/" + doc)).text();
+    body.innerHTML = legalCache[doc];
+  } catch { body.innerHTML = "<p>Couldn't load this page. <a href='/" + doc + "' target='_blank'>Open it on its own</a>.</p>"; }
+  $("legalScroll").scrollTop = 0;
+  body.classList.remove("swap"); body.style.animation = "none"; void body.offsetWidth; body.style.animation = "";   // replay the fade-in for the new text
+}
+function closeLegal() { $("legal").classList.add("hidden"); }
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("a[data-legal]");
+  if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;     // ctrl/cmd-click still opens the plain page in a new tab
+  e.preventDefault(); showLegal(a.dataset.legal);
+});
+$("legal").querySelectorAll(".legal-tabs button").forEach((b) => (b.onclick = () => showLegal(b.dataset.t)));
+$("closeLegal").onclick = closeLegal; $("legalOk").onclick = closeLegal;
+$("legal").onmousedown = (e) => { if (e.target === $("legal")) closeLegal(); };
+addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("legal").classList.contains("hidden")) { e.stopImmediatePropagation(); closeLegal(); } }, true);
+
 // ---------- 6-digit code boxes (used for sign-up verification and for password reset) ----------
 function makeOtp(root, onComplete) {
   const boxes = [...root.querySelectorAll(".otp-i")];
@@ -197,12 +227,20 @@ function googleBusy(on) {
   });
   if (on) googleWatch = setTimeout(() => { googleBusy(false); toast("Google is taking too long. Please try again.", "err"); }, 12000);   // never leave the button stuck
 }
+function needAgree() {
+  if ($("agree").checked) return false;
+  const l = $("fAgree"); l.classList.remove("bad"); void l.offsetWidth; l.classList.add("bad");
+  authEls.err.textContent = "Please agree to the Terms of Service and Privacy Policy to continue.";
+  return true;
+}
+$("agree").addEventListener("change", () => { $("fAgree").classList.remove("bad"); authEls.err.textContent = ""; });
 async function googleGo() {
   if (!config.hasGoogle) { toast("Google sign-in isn't set up yet.", "err"); return; }
+  if (mode === "signup" && needAgree()) return;                          // creating an account needs the Terms ticked
   googleBusy(true);
   try {
     const body = { remember: $("remember").checked };
-    if (mode === "signup") { body.username = authEls.user.value.trim(); body.password = authEls.pass.value; }   // the username they chose is kept
+    if (mode === "signup") { body.username = authEls.user.value.trim(); body.password = authEls.pass.value; body.agree = true; }   // the username they chose is kept
     const d = await api("/api/auth/google/start", { method: "POST", noAuthRedirect: true, body });
     location.href = d.url;
   } catch (err) {
@@ -307,6 +345,7 @@ authEls.form.onsubmit = async (e) => {
   if (mode === "signup" && step === 1) { goStep(2); return; }
   const email = $("email").value.trim();
   if (mode === "signup" && step === 2 && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fieldErr("fEmail", "Enter a valid email address.");
+  if (mode === "signup" && step === 2 && needAgree()) return;
   if (mode === "signup" && step === 3 && otpS.code().length < 6) { otpS.shake(); authEls.err.textContent = "Enter the 6-digit code."; return; }
   authEls.btn.classList.add("loading"); authEls.btn.disabled = true;
   try {
@@ -314,7 +353,7 @@ authEls.form.onsubmit = async (e) => {
     if (mode === "login") data = await api("/api/login", { method: "POST", noAuthRedirect: true, body: { username, password, remember: $("remember").checked } });
     else if (step === 2) {
       // email route: send the code, then slide to the code screen
-      const d = await api("/api/signup/start", { method: "POST", noAuthRedirect: true, body: { username, password, email } });
+      const d = await api("/api/signup/start", { method: "POST", noAuthRedirect: true, body: { username, password, email, agree: true } });
       signupEmail = email.toLowerCase(); $("codeSub").textContent = `We sent a 6-digit code to ${d.email}. It's valid for 10 minutes.`;
       otpS.clear(); startResendCooldown(d.cooldown || 30); goStep(3);
       return;

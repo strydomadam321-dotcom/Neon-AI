@@ -81,6 +81,16 @@ Block layout: optional header lines first (title: My Title, and for neon-pptx op
 - neon-xlsx: CSV rows. Start each sheet with a line sheet: Name. Quote cells that contain commas. A cell that starts with = is a formula (for example =SUM(B2:B10)). Write numbers without currency symbols or thousands separators.
 If the content itself contains code fences, open and close the outer block with four backticks. Use normal code blocks (html, python, ...) for code and web pages.`;
 
+// ---------- legal documents (legal/terms.html, legal/privacy.html) ----------
+// Bump LEGAL_VERSION whenever the wording changes. CONTACT_EMAIL (environment) is where people can send privacy requests.
+const LEGAL_VERSION = "2026-11-20", LEGAL_UPDATED = "20 November 2026";
+const CONTACT_EMAIL = (process.env.CONTACT_EMAIL || "").trim();
+const readLegal = (n) => { try { return fs.readFileSync(path.join(__dirname, "legal", n + ".html"), "utf8"); } catch { return "<p>This document is not available right now.</p>"; } };
+const LEGAL = { terms: readLegal("terms"), privacy: readLegal("privacy") };
+const legalHtml = (doc) => LEGAL[doc]
+  .replace(/\{\{VERSION\}\}/g, LEGAL_VERSION).replace(/\{\{UPDATED\}\}/g, LEGAL_UPDATED)
+  .replace(/\{\{CONTACT\}\}/g, CONTACT_EMAIL ? `<a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>` : "the contact details published on freestudyresources.org");
+
 const DAY = 24 * 60 * 60 * 1000;
 const REMEMBER_MS = 30 * DAY; // "stay logged in" lasts 30 days
 const SHORT_MS = 12 * 60 * 60 * 1000; // otherwise: until the browser closes (max 12 h)
@@ -153,6 +163,8 @@ create table if not exists password_resets(
   sent_at timestamptz not null default now()
 );
 alter table users add column if not exists plan_chosen boolean not null default false;
+alter table users add column if not exists terms_version text;
+alter table users add column if not exists terms_at timestamptz;
 create table if not exists site_state(
   key text primary key,
   set_at timestamptz not null default now(),
@@ -175,6 +187,7 @@ create table if not exists signup_pending(
   expires_at timestamptz not null,
   sent_at timestamptz not null default now()
 );
+alter table signup_pending add column if not exists terms_version text;
 create table if not exists usage(
   user_id int not null references users(id) on delete cascade,
   day date not null default current_date,
@@ -393,7 +406,7 @@ const big = express.json({ limit: "45mb" });
 
 // ---------- auth ----------
 app.get("/api/config", (req, res) => {
-  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: false, hasKey: !!process.env.ANTHROPIC_API_KEY, hasGemini: !!GEMINI_KEY, hasGoogle: !!(GOOGLE_ID && GOOGLE_SECRET), mailReady: MAIL_READY, defaultEffort: DEFAULT_EFFORT });
+  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: false, hasKey: !!process.env.ANTHROPIC_API_KEY, hasGemini: !!GEMINI_KEY, hasGoogle: !!(GOOGLE_ID && GOOGLE_SECRET), mailReady: MAIL_READY, legalVersion: LEGAL_VERSION, defaultEffort: DEFAULT_EFFORT });
 });
 
 const USER_RE = /^[A-Za-z0-9_.-]{3,24}$/;
@@ -443,6 +456,7 @@ app.post("/api/signup/start", small, wrap(async (req, res) => {
   if (limited("sstart:" + req.ip, 10, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
   const bad = checkSignupFields(req.body || {});
   if (bad) return res.status(400).json(bad);
+  if (req.body?.agree !== true) return res.status(400).json({ error: "Please agree to the Terms and Privacy Policy to continue.", field: "agree" });
   if (!MAIL_READY) return res.status(503).json({ error: "Email sign-up isn't available yet. Try Continue with Google instead.", field: "email" });
   const { username, password } = req.body, em = req.body.email.trim().toLowerCase();
   if (limited("smail:" + em, 5, 60 * 60e3)) return res.status(429).json({ error: "Too many codes sent to that email. Try again in an hour.", field: "email" });
@@ -451,9 +465,9 @@ app.post("/api/signup/start", small, wrap(async (req, res) => {
   if (dup.some((r) => r.u)) return res.status(409).json({ error: "That username is taken.", field: "username" });
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
   const hash = await bcrypt.hash(password, 11);
-  await q(`insert into signup_pending(email,username,username_lc,pass_hash,code_hash,attempts,expires_at,sent_at) values($1,$2,$3,$4,$5,0,$6,now())
-           on conflict(email) do update set username=$2, username_lc=$3, pass_hash=$4, code_hash=$5, attempts=0, expires_at=$6, sent_at=now()`,
-    [em, username, username.toLowerCase(), hash, codeHash(em, code), new Date(Date.now() + CODE_MS)]);
+  await q(`insert into signup_pending(email,username,username_lc,pass_hash,code_hash,attempts,expires_at,sent_at,terms_version) values($1,$2,$3,$4,$5,0,$6,now(),$7)
+           on conflict(email) do update set username=$2, username_lc=$3, pass_hash=$4, code_hash=$5, attempts=0, expires_at=$6, sent_at=now(), terms_version=$7`,
+    [em, username, username.toLowerCase(), hash, codeHash(em, code), new Date(Date.now() + CODE_MS), LEGAL_VERSION]);
   try { await sendCodeEmail(em, code); }
   catch (e) {
     console.error("send code failed:", e.message);
@@ -494,8 +508,8 @@ app.post("/api/signup/verify", small, wrap(async (req, res) => {
   }
   let user;
   try {
-    ({ rows: [user] } = await q("insert into users(username,username_lc,pass_hash,email,email_norm,email_verified) values($1,$2,$3,$4,$5,true) returning id,username,settings,plan,plan_requested,has_password,avatar",
-      [p.username, p.username_lc, p.pass_hash, em, normEmail(em)]));
+    ({ rows: [user] } = await q("insert into users(username,username_lc,pass_hash,email,email_norm,email_verified,terms_version,terms_at) values($1,$2,$3,$4,$5,true,$6,now()) returning id,username,settings,plan,plan_requested,has_password,avatar",
+      [p.username, p.username_lc, p.pass_hash, em, normEmail(em), p.terms_version || LEGAL_VERSION]));
   } catch (e) {
     if (e.code === "23505") return /email/.test(e.constraint || "") ? res.status(409).json({ error: "This email already has an account (email or Google). Please sign in instead.", field: "email" }) : res.status(409).json({ error: "That username was just taken. Pick another.", field: "username" });
     throw e;
@@ -524,6 +538,7 @@ app.post("/api/auth/google/start", small, wrap(async (req, res) => {
   if (username !== undefined || password !== undefined) {   // creating an account: they picked a username and password first
     const bad = checkSignupFields({ username, password, email: "x@x.xx" });
     if (bad) return res.status(400).json(bad);
+    if (req.body?.agree !== true) return res.status(400).json({ error: "Please agree to the Terms and Privacy Policy to continue.", field: "agree" });
     if ((await q("select 1 from users where username_lc = $1", [username.toLowerCase()])).rows[0]) return res.status(409).json({ error: "That username is taken.", field: "username" });
     name = username; hash = sealPw(password);
   }
@@ -569,6 +584,7 @@ app.get("/api/auth/google/callback", wrap(async (req, res) => {
   if (pend.username && (user || byMail)) return authFail(res, "This email or Google account already has an account. Please sign in instead.");   // they pressed Create account, but it already exists
   if (!user && byMail) user = (await q(`update users set google_sub = $1, email_verified = true where id = $2 and google_sub is null returning ${cols}`, [sub, byMail.id])).rows[0]; // signing IN with the same mailbox: link to that account
   if (user) { if (pic && pic !== user.avatar) await q("update users set avatar = $1 where id = $2", [pic, user.id]); }
+  else if (!pend.username) return authFail(res, "There's no NEON AI account for that Google account yet. Choose Create account first.");   // signing in never makes an account: that needs the sign-up form and the Terms
   else {
     // new account: the username they typed in the sign-up form (if it's still free), otherwise one made from their email
     const base = usernameFromEmail(email);
@@ -579,8 +595,8 @@ app.get("/api/auth/google/callback", wrap(async (req, res) => {
     for (let i = 0; i < 25 && !user; i++) {
       const name = i === 0 ? (wanted || base) : i === 1 && wanted ? base : base.slice(0, 19) + String(crypto.randomInt(10, 9999));
       try {
-        user = (await q(`insert into users(username,username_lc,pass_hash,email,email_norm,email_verified,google_sub,has_password,avatar) values($1,$2,$3,$4,$5,true,$6,$7,$8) returning ${cols}`,
-          [name, name.toLowerCase(), hash, email, enorm, sub, !!pend.pass_hash, pic])).rows[0];
+        user = (await q(`insert into users(username,username_lc,pass_hash,email,email_norm,email_verified,google_sub,has_password,avatar,terms_version,terms_at) values($1,$2,$3,$4,$5,true,$6,$7,$8,$9,now()) returning ${cols}`,
+          [name, name.toLowerCase(), hash, email, enorm, sub, !!pend.pass_hash, pic, LEGAL_VERSION])).rows[0];
         created = true;
       } catch (e) {
         if (e.code !== "23505") throw e;
@@ -1156,6 +1172,20 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
   }
   res.end();
 });
+
+
+// ---------- public Terms / Privacy pages (also what Google's sign-in setup asks for) ----------
+const legalPage = (doc) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${doc === "terms" ? "Terms of Service" : "Privacy Policy"} · NEON AI</title>
+<style>*{box-sizing:border-box}html{background:#12062b}body{margin:0;padding:28px 16px 60px;font:16px/1.65 Inter,system-ui,"Segoe UI",Roboto,Arial,sans-serif;color:#f2e6ff;background:radial-gradient(900px 500px at 50% -5%,rgba(255,95,216,.25),transparent 70%),#12062b}
+.wrap{max-width:780px;margin:0 auto}.top{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:18px}.brand{font-weight:800;letter-spacing:.32em;color:#ff8ae2;text-decoration:none;font-size:15px}
+nav a{color:#c9b4e8;text-decoration:none;margin-left:16px;font-size:14px}nav a.on,nav a:hover{color:#3df0ff}
+article{padding:34px 36px;border-radius:20px;background:rgba(40,16,78,.6);border:1px solid rgba(255,160,240,.28);box-shadow:0 30px 80px rgba(8,1,26,.6)}
+h1{margin:0 0 4px;font-size:30px;background:linear-gradient(90deg,#ff5fd8,#3df0ff);-webkit-background-clip:text;background-clip:text;color:transparent}.meta{margin:0 0 20px;color:#a994cc;font-size:13px}
+h2{margin:30px 0 8px;font-size:19px;color:#fff}h3{margin:18px 0 6px;font-size:15px;color:#e5d4ff}p,li{color:#dccdf2}ul,ol{padding-left:22px}li{margin:5px 0}a{color:#3df0ff}b{color:#fff}
+.legal-sum{margin:6px 0 10px;padding:16px 18px;border-radius:14px;background:rgba(61,240,255,.07);border:1px solid rgba(61,240,255,.3)}.legal-sum ul{margin:8px 0 0}
+@media(max-width:560px){article{padding:22px 18px}}</style></head><body><div class="wrap"><div class="top"><a class="brand" href="/">NEON AI</a><nav><a href="/terms" class="${doc === "terms" ? "on" : ""}">Terms of Service</a><a href="/privacy" class="${doc === "privacy" ? "on" : ""}">Privacy Policy</a><a href="/">Back to the site</a></nav></div><article>${legalHtml(doc)}</article></div></body></html>`;
+for (const doc of ["terms", "privacy"]) app.get("/" + doc, (req, res) => res.set("Cache-Control", "no-cache").type("html").send(legalPage(doc)));
+app.get("/api/legal/:doc", (req, res) => LEGAL[req.params.doc] ? res.set("Cache-Control", "no-cache").type("html").send(legalHtml(req.params.doc)) : res.status(404).end());
 
 app.use("/api", (req, res) => res.status(404).json({ error: "Not found" }));
 

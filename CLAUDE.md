@@ -24,3 +24,9 @@
 - The AI writes ```neon-pdf / neon-docx / neon-pptx / neon-xlsx blocks (instructions: `FILE_RULES` in `server.js`, appended to every system prompt).
 - `public/files.js` turns the text into the preview and builds the real file in the browser (pdfmake, docx, PptxGenJS, SheetJS, loaded from a CDN on first use).
 - Code/HTML previews run in a sandboxed iframe without same-origin; `STORAGE_SHIM` in `public/app.js` gives them in-memory localStorage/cookies.
+
+## Terms of Service and Privacy Policy
+- The wording lives in `legal/terms.html` and `legal/privacy.html` (one source). It is served as pages at `/terms` and `/privacy` and as fragments for the in-app viewer (`/api/legal/:doc`).
+- If the wording changes, bump `LEGAL_VERSION`/`LEGAL_UPDATED` in `server.js`. Keep the text true to what the app does (providers, retention, cookies).
+- Creating an account needs the consent tick (`agree`); `users.terms_version` / `terms_at` record it. Signing in with Google never creates an account.
+- `CONTACT_EMAIL` (environment) is shown in the documents for privacy requests; never put the owner's personal address in the repo.

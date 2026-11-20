@@ -21,6 +21,7 @@ A neon, ChatGPT-style web chat for Claude. Accounts with username + password, ch
 | `RESEND_API_KEY` | for email sign-up | Resend API key; sends the 6-digit verification codes. Without it, email sign-up is off |
 | `MAIL_FROM` | for email sign-up | Sender, e.g. `NEON AI <noreply@yourdomain.com>` (the domain must be verified in Resend) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | for Google sign-in | OAuth client from Google Cloud. Redirect URI: `https://YOUR-DOMAIN/api/auth/google/callback` |
+| `CONTACT_EMAIL` | recommended | Public address shown in the Terms and Privacy Policy for privacy requests. Unset: the text says to use the contact details on the site |
 | `OWNER_USERNAMES` | no | Comma-separated usernames that always get the Max plan (full access, no limits) |
 | `GEMINI_API_KEY` | no | Free Google AI Studio key. Enables the Gemini models in the model menu |
 | `GEMINI_MODELS` | no | Override the Gemini model list: `id|Display name,id|Display name` (defaults: gemini-3.5-flash-lite, gemini-2.5-flash) |

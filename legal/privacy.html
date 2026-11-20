@@ -1,0 +1,116 @@
+<h1>Privacy Policy</h1>
+<p class="meta">NEON AI · Last updated {{UPDATED}} · Version {{VERSION}}</p>
+
+<div class="legal-sum">
+  <b>The short version</b>
+  <ul>
+    <li>We collect as little as we can: a <b>username</b>, a <b>verified email address</b>, a <b>scrambled (hashed) password</b>, and the <b>chats</b> you create.</li>
+    <li>Your email is used for one thing: <b>proving the address is yours</b> (sign-up codes and password resets). It is not used for marketing.</li>
+    <li>We <b>never sell, rent or give your email or chats to anyone</b> for their own use, and we will never use your information to harm, harass, scam or spy on you.</li>
+    <li>A small number of service providers handle your data <b>only to run NEON AI</b> (hosting, sending emails, and the AI models). They are listed in section 5.</li>
+    <li>You can <b>delete your chats or your whole account</b> yourself, any time, in Settings.</li>
+  </ul>
+</div>
+
+<h2>1. Who we are and what this covers</h2>
+<p>NEON AI ("we", "us", "our") is an AI chat website at freestudyresources.org, run by an individual based in Australia. This policy explains what personal information we collect when you use NEON AI, why we collect it, how we store and protect it, who it is shared with, and what choices you have.</p>
+<p>We handle personal information in line with the Australian Privacy Principles in the <i>Privacy Act 1988</i> (Cth) as a matter of good practice. "Personal information" means information that identifies you or could reasonably identify you, such as your email address or the things you write in a chat.</p>
+
+<h2>2. What we collect</h2>
+<h3>Information you give us</h3>
+<ul>
+  <li><b>Username.</b> The name you choose. If you sign up with Google, it is the username you typed in the sign-up form.</li>
+  <li><b>Email address.</b> You enter it when signing up, or we receive it from Google if you use "Continue with Google".</li>
+  <li><b>Password.</b> Only if you choose one. We never store it as typed. We store a one-way scrambled version (a bcrypt hash) that we cannot turn back into your password.</li>
+  <li><b>Your chats.</b> Everything you type, the AI's replies, chat titles, and any files or images you attach (including the text we read from Word, PowerPoint, PDF and text files). Chats are stored so they sync between your devices.</li>
+  <li><b>Settings.</b> Your custom instructions, chosen model and effort level, and display options (such as retro mode).</li>
+  <li><b>Plan choice.</b> Which plan you picked in the plans pop-up. No payment is taken at the moment.</li>
+</ul>
+<h3>Information we receive from Google (only if you use Google sign-in)</h3>
+<ul>
+  <li>Your Google account's unique ID, your <b>email address</b> (which Google has already verified), and the link to your <b>profile picture</b>.</li>
+  <li>We do <b>not</b> receive your Google password, your contacts, your files, your emails or your location.</li>
+</ul>
+<h3>Information we create or record</h3>
+<ul>
+  <li><b>Usage counters.</b> How many AI tokens or messages you used today, so we can apply plan limits.</li>
+  <li><b>Consent record.</b> The date and the version of these documents you agreed to when you created your account.</li>
+  <li><b>Sign-in sessions.</b> A random session token (stored hashed) so you stay signed in.</li>
+  <li><b>Security and technical data.</b> Your IP address and basic request details are seen by our hosting provider and used briefly to limit abuse (for example, to slow down someone guessing passwords). Server logs may record IP addresses and errors.</li>
+</ul>
+<h3>What we do not collect</h3>
+<p>We do not collect your phone number, home address, date of birth, payment card details, contacts or precise location. We do not use advertising trackers or analytics services, and we do not build advertising profiles.</p>
+
+<h2>3. Why we collect your email address</h2>
+<p>Your email address is collected for these reasons, and no others:</p>
+<ol>
+  <li><b>To prove the address is yours.</b> When you sign up with email, we send a 6-digit code to that address. Entering it confirms you control the mailbox. Accounts made with Google use the address Google has already verified.</li>
+  <li><b>To let you reset a forgotten password.</b> We email a one-time code to the address on the account.</li>
+  <li><b>To prevent duplicate and abusive accounts.</b> We keep one account per email address, so people cannot create many accounts to get around limits or to harass others.</li>
+  <li><b>To contact you about your account when we have to.</b> For example a security problem, a change to these documents, or (in future) a receipt if you buy a paid plan.</li>
+</ol>
+<p><b>We do not use your email for marketing, newsletters or advertising.</b> If we ever want to send anything promotional, we will ask for your separate permission first and include an unsubscribe link, as the <i>Spam Act 2003</i> (Cth) requires. Your email address is never shown to other users. NEON AI has no public profiles and users cannot see each other.</p>
+
+<h2>4. How we store and protect your information</h2>
+<ul>
+  <li><b>Where.</b> Your account and chats are stored in a PostgreSQL database run by our hosting provider, Render, in a data centre in the United States (Oregon).</li>
+  <li><b>In transit.</b> Everything between your device and NEON AI travels over an encrypted HTTPS connection.</li>
+  <li><b>Passwords.</b> Stored only as a bcrypt hash. Verification and reset codes are also stored only as hashes, expire after 10 minutes, and are locked after 5 wrong tries.</li>
+  <li><b>Sign-in sessions.</b> Kept in a cookie that scripts cannot read, with the token stored hashed in our database.</li>
+  <li><b>Access.</b> Only the person who runs NEON AI can access the database and server settings. Secret keys (such as the keys for the AI providers and email service) are kept in the hosting provider's protected settings, not in the website's code.</li>
+  <li><b>Abuse protection.</b> Rate limits on sign-in, sign-up and messages.</li>
+</ul>
+<p>No system is perfectly secure, and we cannot promise that data can never be accessed by someone it shouldn't be. If a data breach happens that is likely to cause you serious harm, we will tell you and the regulator as the law requires.</p>
+
+<h2>5. Who we share information with</h2>
+<p><b>Our promise.</b> We do not sell, rent or trade your personal information. We do not give your email address or your chats to advertisers, data brokers or any other third party to use for their own purposes. We will not use your information in any malicious way, including to harm, harass, defraud, scam, track or impersonate you.</p>
+<p>To run NEON AI we use a few service providers. Each one receives only what it needs for its job:</p>
+<ul>
+  <li><b>Render</b> (hosting and database, United States). Holds everything stored in NEON AI: your account details, settings and chats.</li>
+  <li><b>Resend</b> (email delivery, United States). Receives your email address and the one-time code so it can deliver our emails to you.</li>
+  <li><b>Google</b> (sign-in, United States and other countries). If you use "Continue with Google", Google tells us your email, ID and profile picture, and learns that you signed in to NEON AI.</li>
+  <li><b>Google Gemini</b> (AI model). If you use a Gemini model, the conversation (your messages, instructions and attachments) is sent to Google to produce the reply. <b>We use Google's free Gemini API tier. Under Google's terms for free-tier use, content you send may be used by Google to improve its products, and human reviewers may read it. Do not send private or sensitive information to Gemini models.</b></li>
+  <li><b>Anthropic Claude</b> (AI model). If you use a Claude model, the conversation is sent to Anthropic to produce the reply. Under Anthropic's current terms for its business API, it does not train its models on this data by default, but it may keep it for a limited time.</li>
+  <li><b>Public code and font libraries.</b> Your browser loads some open-source libraries and fonts from public networks (cdnjs / Cloudflare, jsDelivr, Google Fonts). Like any website, those networks can see your IP address when your browser fetches the files. Libraries for making PDF, Word, PowerPoint and Excel files are loaded the first time you use them.</li>
+</ul>
+<p>We cannot control how these providers handle data once it reaches them. Their own terms and privacy policies apply to that handling, and you should read them if you are concerned.</p>
+<p>We may also disclose information if the law requires it (for example a valid court order), to protect someone's safety, or to stop a serious abuse of the service. If NEON AI is ever sold or handed to someone else, your information would only transfer on terms that protect it as this policy does, and we would tell you first.</p>
+
+<h2>6. Sending information overseas</h2>
+<p>Our providers are mainly based in the United States, and your information (including chats sent to the AI models) is stored or processed there and possibly in other countries. By using NEON AI you understand that your information will be handled overseas. We choose established providers and take reasonable steps to keep your information protected, but overseas providers are not bound by the Australian Privacy Principles in the same way.</p>
+
+<h2>7. How long we keep information</h2>
+<ul>
+  <li><b>Account details and chats:</b> until you delete them. Deleting a chat, all chats, or your account removes it from our live database straight away. Copies held in provider backups, if any, are removed when those backups expire.</li>
+  <li><b>Sign-in sessions:</b> up to 30 days if you tick "Keep me signed in", otherwise up to 12 hours.</li>
+  <li><b>Verification and reset codes:</b> 10 minutes. Half-finished sign-ups are cleared automatically soon after they expire.</li>
+  <li><b>Server logs and IP addresses:</b> kept by our hosting provider for its own standard period.</li>
+  <li><b>Consent record:</b> kept with your account and removed when the account is deleted.</li>
+</ul>
+
+<h2>8. Cookies and local storage</h2>
+<ul>
+  <li><b>neon_sid</b>: keeps you signed in. Needed for the site to work.</li>
+  <li><b>neon_gs</b>: a short-lived (10 minute) security cookie used only while you sign in with Google.</li>
+  <li><b>neon_bp</b>: only set if the site is switched off and you enter a special bypass code.</li>
+  <li><b>Browser storage:</b> remembers display options (theme, graphics mode) and which chat you had open. It stays on your device.</li>
+</ul>
+<p>We do not use advertising or tracking cookies.</p>
+
+<h2>9. Your choices and rights</h2>
+<ul>
+  <li><b>Delete.</b> In Settings you can delete all your chats or delete your account entirely.</li>
+  <li><b>Access and correction.</b> You can see your chats in the app. To ask for a copy of the personal information we hold about you, or to correct it (for example a wrong email address), contact us. We will respond within a reasonable time, usually 30 days.</li>
+  <li><b>Withdraw consent.</b> Delete your account at any time. Existing messages already sent to an AI provider cannot be recalled by us.</li>
+  <li><b>Marketing.</b> We send none. If that ever changes you will be able to opt out in one click.</li>
+  <li><b>Complaints.</b> Contact us first and we will try to fix it. If you are not satisfied, you can complain to the Office of the Australian Information Commissioner (OAIC) at www.oaic.gov.au.</li>
+</ul>
+
+<h2>10. Children</h2>
+<p>NEON AI is for people aged <b>16 and over</b>. If you are under 18, you should only use it with a parent or guardian's permission. We do not knowingly collect information from anyone under 16. If we learn we have, we will delete it. A parent or guardian who thinks this has happened can contact us.</p>
+
+<h2>11. Changes to this policy</h2>
+<p>We may update this policy. The version and date at the top show when it last changed. If a change is significant, we will tell you in the app or by email before it takes effect. Using NEON AI after a change means you accept the updated policy.</p>
+
+<h2>12. Contact</h2>
+<p>For privacy questions, access or correction requests, or complaints, contact us at {{CONTACT}}.</p>
