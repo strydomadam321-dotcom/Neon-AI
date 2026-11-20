@@ -145,6 +145,11 @@ create table if not exists meta(key text primary key, done_at timestamptz not nu
   const r = await q("insert into meta(key) values('reset-2026-11-plans') on conflict do nothing returning key");
   if (r.rowCount) { await q("truncate users restart identity cascade"); console.log("One-time reset done: all accounts and chats removed."); }
 }
+// one-time housekeeping: remove a test account (its chats, sessions and usage go with it). Runs once, then never again.
+{
+  const r = await q("insert into meta(key) values('rm-user-asdfefeweffas') on conflict do nothing returning key");
+  if (r.rowCount) { const d = await q("delete from users where username_lc = 'asdfefeweffas'"); console.log(`Housekeeping: removed test account asdfefeweffas (${d.rowCount} found)`); }
+}
 const cleanup = () => { q("delete from sessions where expires_at < now()").catch(() => {}); q("delete from signup_pending where expires_at < now() - interval '1 hour'").catch(() => {}); };
 cleanup();
 setInterval(cleanup, 60 * 60 * 1000).unref();
