@@ -947,6 +947,13 @@ function friendlyError(err) {
   return /credit balance/i.test(m) ? "The Anthropic account is out of credits." : m.slice(0, 300) || "Request failed";
 }
 
+// Long replies: ask for the biggest output the model allows; if a reply still hits the limit, the server asks the model to carry on
+// and stitches the parts together, so nothing is cut off.
+const CONT_PROMPT = "Your previous reply was cut off by the output limit. Continue exactly where it stopped: no preface, no repetition, no apology. Start with the very next character.";
+const MAX_CONTINUES = 4;
+const learnedClaudeMax = new Map();   // model id -> output limit learned from an API error
+const learnedGeminiMax = new Map();
+
 // effort -> extended-thinking budget for Claude (Low = no extended thinking)
 const CLAUDE_THINK = [
   { budget: 0, max: 16000 },
@@ -980,9 +987,9 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
     return { role: "user", parts };
   });
 
-  let sentText = false, tokens = 0;
+  let sentText = false, tokens = 0, seg = "", maxOut = learnedGeminiMax.get(model) || 65536;
   async function attempt(withThinking) {
-    const generationConfig = { maxOutputTokens: 32000 };
+    const generationConfig = { maxOutputTokens: maxOut };
     const th = withThinking ? geminiThinking(model, effort) : null;
     if (th) generationConfig.thinkingConfig = th;
     const r = await fetch(`${GEMINI_BASE}/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
@@ -994,7 +1001,7 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
       let msg = ""; try { msg = (await r.json())?.error?.message || ""; } catch {}
       const e = new Error(msg || `Gemini error ${r.status}`); e.status = r.status; e.provider = "gemini"; e.hadThinking = !!th; throw e;
     }
-    const dec = new TextDecoder(); let buf = "", finish = "", blocked = "";
+    const dec = new TextDecoder(); let buf = "", finish = "", blocked = "", reqTotal = 0;
     for await (const chunk of r.body) {
       buf += dec.decode(chunk, { stream: true });
       let i;
@@ -1002,26 +1009,46 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
         const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
         if (!line.startsWith("data:")) continue;
         let j; try { j = JSON.parse(line.slice(5)); } catch { continue; }
-        if (j.usageMetadata?.totalTokenCount) tokens = j.usageMetadata.totalTokenCount;
+        if (j.usageMetadata?.totalTokenCount) reqTotal = j.usageMetadata.totalTokenCount;
         if (j.promptFeedback?.blockReason) blocked = j.promptFeedback.blockReason;
         const cand = j.candidates?.[0];
         for (const p of cand?.content?.parts || []) {
           if (p.thought) { send({ th: 1 }); continue; }
-          if (typeof p.text === "string" && p.text) { sentText = true; send({ t: p.text }); }
+          if (typeof p.text === "string" && p.text) { sentText = true; seg += p.text; send({ t: p.text }); }
         }
         if (cand?.finishReason) finish = cand.finishReason;
       }
     }
-    if (blocked) send({ t: "\n\n*(Gemini blocked this request.)*" });
-    else if (finish === "MAX_TOKENS") send({ t: "\n\n*(Reached max length.)*" });
-    else if (finish === "SAFETY" || finish === "PROHIBITED_CONTENT") send({ t: "\n\n*(Gemini declined to answer this request.)*" });
-    else if (!sentText) send({ t: "*(Gemini returned an empty response. Try again or pick another model.)*" });
+    tokens += reqTotal;                                   // each request is billed on its own (continuations re-send the earlier text)
+    return { finish, blocked };
   }
-  try { await attempt(true); }
+  // an output-size error means this model allows less than we asked for: remember the smaller number and retry
+  async function attemptSafe(withThinking) {
+    for (let k = 0; k < 3; k++) {
+      try { return await attempt(withThinking); }
+      catch (e) {
+        if (e.status === 400 && !sentText && /max.?output.?tokens|output token|out of range|exceeds?/i.test(e.message) && !/api key/i.test(e.message) && maxOut > 8192) { maxOut = maxOut > 40000 ? 32000 : Math.floor(maxOut / 2); learnedGeminiMax.set(model, maxOut); continue; }
+        throw e;
+      }
+    }
+    return attempt(withThinking);
+  }
+  let res1;
+  try { res1 = await attemptSafe(true); }
   catch (e) {
     // some models reject thinking settings: retry once without them
-    if (e.status === 400 && e.hadThinking && !sentText && !/api key/i.test(e.message)) await attempt(false); else throw e;
+    if (e.status === 400 && e.hadThinking && !sentText && !/api key/i.test(e.message)) res1 = await attemptSafe(false); else throw e;
   }
+  // hit the output limit: keep going automatically (no thinking this time, so everything goes into the answer)
+  for (let n = 0; n < MAX_CONTINUES && res1.finish === "MAX_TOKENS" && seg.trim(); n++) {
+    contents.push({ role: "model", parts: [{ text: seg }] }, { role: "user", parts: [{ text: CONT_PROMPT }] });
+    seg = "";
+    res1 = await attemptSafe(false);
+  }
+  if (res1.blocked) send({ t: "\n\n*(Gemini blocked this request.)*" });
+  else if (res1.finish === "MAX_TOKENS") send({ t: "\n\n*(Reached max length.)*" });
+  else if (res1.finish === "SAFETY" || res1.finish === "PROHIBITED_CONTENT") send({ t: "\n\n*(Gemini declined to answer this request.)*" });
+  else if (!sentText) send({ t: "*(Gemini returned an empty response. Try again or pick another model.)*" });
   return tokens;
 }
 
@@ -1070,24 +1097,46 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
       send({ done: true, tokens: use.gemini + (used || 0) });
     } else {
       const cfg = CLAUDE_THINK[effort];
-      let gotText = false;
-      const run = async (thinking) => {
+      let gotText = false, acc = "";
+      const run = async (thinking, extra) => {
+        const cap = learnedClaudeMax.get(info.id) || 64000;                    // the biggest reply the model will give
+        const budget = Math.min(cfg.budget, Math.max(1024, cap - 4000));        // thinking has to fit under the cap with room left to answer
         stream = client.messages.stream({
           model: info.id,
-          max_tokens: thinking ? cfg.max : 16000,
+          max_tokens: cap,
           system,
-          ...(thinking ? { thinking: { type: "enabled", budget_tokens: cfg.budget } } : {}),
-          messages: history.map((m) => ({ role: m.role, content: toContent(m) })),
+          ...(thinking ? { thinking: { type: "enabled", budget_tokens: budget } } : {}),
+          messages: [...history.map((m) => ({ role: m.role, content: toContent(m) })), ...extra],
         });
-        stream.on("text", (t) => { gotText = true; send({ t }); });
+        stream.on("text", (t) => { gotText = true; acc += t; send({ t }); });
         stream.on("streamEvent", (e) => { if (e.type === "content_block_start" && e.content_block?.type === "thinking") send({ th: 1 }); });
         return stream.finalMessage();
       };
+      // if the API says the model allows fewer output tokens than we asked for, remember its number and go again
+      const runSafe = async (thinking, extra) => {
+        for (let k = 0; k < 3; k++) {
+          try { return await run(thinking, extra); }
+          catch (e) {
+            const msg = String(e?.message || "");
+            if (e?.status === 400 && !gotText && /max_tokens/i.test(msg) && !/thinking|budget_tokens/i.test(msg.replace(/max_tokens/gi, ""))) {
+              const m = msg.match(/max_tokens:\s*\d+\s*>\s*(\d+)/), cur = learnedClaudeMax.get(info.id) || 64000;
+              learnedClaudeMax.set(info.id, m ? Number(m[1]) : Math.max(8000, Math.floor(cur / 2)));
+              continue;
+            }
+            throw e;
+          }
+        }
+        return run(thinking, extra);
+      };
       let final;
-      try { final = await run(cfg.budget > 0); }
+      try { final = await runSafe(cfg.budget > 0, []); }
       catch (e) {
         // if the model rejects the thinking settings, retry once without them
-        if (cfg.budget > 0 && e?.status === 400 && !gotText && !res.writableEnded) final = await run(false); else throw e;
+        if (cfg.budget > 0 && e?.status === 400 && !gotText && !res.writableEnded) final = await runSafe(false, []); else throw e;
+      }
+      // hit the output limit: carry on automatically and stitch the parts together (no thinking, so all of it goes into the answer)
+      for (let n = 0; n < MAX_CONTINUES && final.stop_reason === "max_tokens" && acc.trim(); n++) {
+        final = await runSafe(false, [{ role: "assistant", content: acc.replace(/\s+$/, "") }, { role: "user", content: CONT_PROMPT }]);
       }
       if (final.stop_reason === "refusal") send({ t: "\n\n*(The model declined to answer this request.)*" });
       if (final.stop_reason === "max_tokens") send({ t: "\n\n*(Reached max length.)*" });
