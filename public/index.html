@@ -366,6 +366,14 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
         <p class="hint-sm">Model and effort are picked from the buttons at the top of a chat.</p>
       </section>
 
+      <section class="sec danger-zone dev-zone" id="devSec" hidden>
+        <h4>Developer</h4>
+        <div class="set-row">
+          <div class="txt"><b>Nuke</b><span>Takes the whole NEON AI website offline for everyone, on every address, until Claude turns it back on</span></div>
+          <button id="nukeBtn" class="btn danger"><svg class="ic"><use href="#i-alert"/></svg>Nuke</button>
+        </div>
+      </section>
+
       <section class="sec danger-zone">
         <h4>Danger zone</h4>
         <div class="set-row">
@@ -402,7 +410,7 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
     </div>
     <div class="set-body">
       <div id="plansGrid" class="plan-grid"></div>
-      <p class="pay-note"><svg class="ic"><use href="#i-info"/></svg><span>Paid plans open soon. Choose one and we'll switch it on for your account the moment payments go live. Until then you stay on your current plan.</span></p>
+      <p class="pay-note"><svg class="ic"><use href="#i-info"/></svg><span id="plansNote">Paid plans open soon. Choose one and we'll switch it on for your account the moment payments go live. Until then you stay on your current plan.</span></p>
     </div>
   </div>
 </div>

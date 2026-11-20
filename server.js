@@ -47,7 +47,11 @@ const PLANS = [
   { id: "max", name: "Max", price: 22, tag: "Everything, unlimited", gemini: "unlimited", claude: "unlimited" },
 ];
 const OWNERS = new Set((process.env.OWNER_USERNAMES || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean));
-const effectivePlan = (u) => (OWNERS.has(String(u.username).toLowerCase()) ? "max" : PLAN_IDS.includes(u.plan) ? u.plan : "free");
+// Dev accounts: full access (Max, no limits) and the Nuke button. Identified by a VERIFIED email (Google-verified or code-verified).
+// Override with DEV_EMAILS (comma separated).
+const DEV_EMAILS = new Set((process.env.DEV_EMAILS || "strydomadam321@gmail.com").split(",").map((x) => x.trim()).filter(Boolean).map((x) => { let [l, d] = x.toLowerCase().split("@"); if (d === "googlemail.com") d = "gmail.com"; if (d === "gmail.com") l = l.split("+")[0].replace(/\./g, ""); return `${l}@${d}`; }));
+const isDevRow = (r) => !!(r && r.email_verified && r.email_norm && DEV_EMAILS.has(r.email_norm));
+const effectivePlan = (u) => (u.dev || OWNERS.has(String(u.username).toLowerCase()) ? "max" : PLAN_IDS.includes(u.plan) ? u.plan : "free");
 const claudeAllowed = (plan, modelId) => plan === "max" || (plan === "plus" && !/opus/i.test(modelId));
 const SYSTEM =
   "You are a helpful, sharp AI assistant inside a futuristic neon chat app. " +
@@ -138,6 +142,12 @@ create table if not exists password_resets(
   expires_at timestamptz not null,
   sent_at timestamptz not null default now()
 );
+alter table users add column if not exists plan_chosen boolean not null default false;
+create table if not exists site_state(
+  key text primary key,
+  set_at timestamptz not null default now(),
+  set_by text
+);
 create table if not exists google_pending(
   state text primary key,
   username text,
@@ -196,10 +206,30 @@ const cleanup = () => { q("delete from sessions where expires_at < now()").catch
 cleanup();
 setInterval(cleanup, 60 * 60 * 1000).unref();
 
+// ---------- kill switch ("Nuke") ----------
+// A dev account can take the whole site offline. It stays offline (every page and API answers 503) until RESUME_AFTER, an
+// ISO timestamp in the environment, is later than the moment it was nuked. To turn the site back on, set
+// RESUME_AFTER to the current time (the redeploy restarts the app) and it comes back.
+let nukedAt = (await q("select set_at from site_state where key = 'nuked'")).rows[0]?.set_at;
+nukedAt = nukedAt ? new Date(nukedAt).getTime() : 0;
+const siteOff = () => nukedAt > 0 && !(Date.parse(process.env.RESUME_AFTER || "") > nukedAt);
+if (siteOff()) console.warn("SITE IS NUKED: serving the offline page until RESUME_AFTER is set to a time after", new Date(nukedAt).toISOString());
+const OFFLINE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Offline · NEON AI</title>
+<style>*{box-sizing:border-box}html,body{height:100%;margin:0}body{display:grid;place-items:center;padding:24px;font-family:Inter,system-ui,"Segoe UI",Arial,sans-serif;color:#f6e9ff;text-align:center;background:radial-gradient(900px 500px at 50% 0%,rgba(255,95,216,.25),transparent 70%),#12062b}
+h1{margin:0 0 10px;font-size:30px;letter-spacing:.22em;font-weight:800;background:linear-gradient(90deg,#ff5fd8,#3df0ff);-webkit-background-clip:text;background-clip:text;color:transparent}p{margin:0;color:#c9b4e8;font-size:15px;line-height:1.5}
+.c{max-width:420px;padding:34px 28px;border-radius:20px;background:rgba(40,16,78,.6);border:1px solid rgba(255,160,240,.3);box-shadow:0 30px 80px rgba(8,1,26,.7),0 0 60px rgba(255,95,216,.18)}</style></head>
+<body><div class="c"><h1>NEON AI</h1><p>We've temporarily taken the site offline. Please check back later.</p></div></body></html>`;
+
 const client = new Anthropic(); // reads ANTHROPIC_API_KEY
 const app = express();
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
+app.use((req, res, next) => {
+  if (!siteOff()) return next();
+  res.status(503).set({ "Retry-After": "3600", "Cache-Control": "no-store" });
+  if (req.path.startsWith("/api")) return res.json({ error: "NEON AI is offline." });
+  res.type("html").send(OFFLINE_HTML);
+});
 
 app.use((req, res, next) => {
   res.set({
@@ -247,10 +277,10 @@ const requireAuth = wrap(async (req, res, next) => {
   const token = getCookie(req, COOKIE);
   if (!token) return res.status(401).json({ error: "Not signed in" });
   const { rows } = await q(
-    `select u.id, u.username, u.settings, u.plan, u.plan_requested, u.has_password, u.avatar from sessions s join users u on u.id = s.user_id
+    `select u.id, u.username, u.settings, u.plan, u.plan_requested, u.has_password, u.avatar, u.plan_chosen, u.email_norm, u.email_verified from sessions s join users u on u.id = s.user_id
      where s.token_hash = $1 and s.expires_at > now()`, [sha(token)]);
   if (!rows[0]) { res.clearCookie(COOKIE, { path: "/" }); return res.status(401).json({ error: "Session expired" }); }
-  req.user = rows[0]; req.token = token;
+  req.user = rows[0]; req.user.dev = isDevRow(rows[0]); req.token = token;
   next();
 });
 
@@ -549,10 +579,11 @@ async function todayUsage(userId) {
   return { gemini: Number(rows[0]?.gemini_tokens || 0), claude: rows[0]?.claude_msgs || 0 };
 }
 async function mePayload(u) {
-  const plan = effectivePlan(u), use = await todayUsage(u.id);
+  const extra = (await q("select email_norm, email_verified, plan_chosen from users where id = $1", [u.id])).rows[0] || {};
+  const dev = isDevRow(extra), plan = effectivePlan({ ...u, dev }), use = await todayUsage(u.id);
   return {
-    user: { username: u.username, hasPassword: u.has_password !== false, picture: u.avatar || null }, settings: u.settings,
-    plan: { id: plan, requested: u.plan_requested && u.plan_requested !== plan ? u.plan_requested : null, owner: OWNERS.has(u.username.toLowerCase()), usedTokens: use.gemini, usedClaude: use.claude },
+    user: { username: u.username, hasPassword: u.has_password !== false, picture: u.avatar || null, dev }, settings: u.settings,
+    plan: { id: plan, requested: u.plan_requested && u.plan_requested !== plan ? u.plan_requested : null, owner: OWNERS.has(u.username.toLowerCase()), chosen: dev || !!extra.plan_chosen, usedTokens: use.gemini, usedClaude: use.claude },
   };
 }
 app.get("/api/me", requireAuth, wrap(async (req, res) => res.json(await mePayload(req.user))));
@@ -571,6 +602,25 @@ app.put("/api/settings", requireAuth, small, wrap(async (req, res) => {
   };
   await q("update users set settings = $1 where id = $2", [s, req.user.id]);
   res.json({ settings: s });
+}));
+
+// the plan pop-up that every new account must answer before using the app (paid plans are only recorded until payments exist)
+app.post("/api/plan/choose", requireAuth, small, wrap(async (req, res) => {
+  const id = req.body?.plan;
+  if (!PLAN_IDS.includes(id)) return res.status(400).json({ error: "Unknown plan." });
+  await q("update users set plan_chosen = true, plan_requested = $2 where id = $1", [req.user.id, id === "free" ? null : id]);
+  res.json(await mePayload({ ...req.user, plan_requested: id === "free" ? null : id }));
+}));
+
+// dev only: take the whole site offline (see "kill switch" above)
+app.post("/api/dev/nuke", requireAuth, small, wrap(async (req, res) => {
+  if (!req.user.dev) return res.status(403).json({ error: "Not allowed." });
+  if (limited("nuke:" + req.user.id, 5, 15 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
+  if (req.body?.confirm !== "NUKE") return res.status(400).json({ error: "Type NUKE exactly to confirm." });
+  await q("insert into site_state(key,set_at,set_by) values('nuked',now(),$1) on conflict(key) do update set set_at = now(), set_by = $1", [req.user.username]);
+  nukedAt = Date.now();
+  console.warn(`NUKE: site taken offline by ${req.user.username} at ${new Date(nukedAt).toISOString()}`);
+  res.json({ ok: true });
 }));
 
 app.post("/api/plan/request", requireAuth, small, wrap(async (req, res) => {

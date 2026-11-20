@@ -329,6 +329,7 @@ function showAuth(msg = "") {
   clearInterval(syncTimer);
   if (busy) abortCtl?.abort();
   user = null; current = null; chats = [];
+  gatePlans = false; $("plans").classList.add("hidden");
   $("app").classList.add("hidden");
   document.body.classList.remove("in-app");
   $("auth").classList.remove("hidden");
@@ -350,7 +351,7 @@ function planCardHTML(p, opts) {
   const c = PLAN_COPY[p.id] || { feats: [], off: [] };
   const price = p.price === 0 ? "Free" : "A$" + p.price;
   const cur = opts.current === p.id;
-  const cta = cur ? "Your plan" : p.price === 0 ? "Included" : (plan.requested === p.id ? "Requested" : "Choose plan");
+  const cta = opts.gate ? (p.price === 0 ? "Continue with Free" : "Choose " + p.name) : cur ? "Your plan" : p.price === 0 ? "Included" : (plan.requested === p.id ? "Requested" : "Choose plan");
   return `<button type="button" class="plan${cur ? " current" : ""}" data-id="${p.id}" role="button">
     ${c.badge ? `<span class="badge">${c.badge}</span>` : ""}
     <span class="pname">${p.name}</span><span class="ptag">${p.tag}</span>
@@ -362,7 +363,7 @@ function renderPlanGrid(box, opts = {}) {
   box.innerHTML = (config.plans || []).map((p) => planCardHTML(p, opts)).join("");
   box.querySelectorAll(".plan").forEach((b) => (b.onclick = () => {
     const id = b.dataset.id;
-    choosePlan(id);
+    if (opts.gate) gateChoose(id); else choosePlan(id);
   }));
 }
 async function choosePlan(id) {
@@ -374,14 +375,31 @@ async function choosePlan(id) {
     toast("Got it. We'll switch on " + (config.plans.find((p) => p.id === id)?.name || "your plan") + " when payments open.");
   } catch (e) { toast(e.message, "err"); }
 }
-function renderPlans() { renderPlanGrid($("plansGrid"), { current: plan.id }); }
-function openPlans() { renderPlans(); $("plans").classList.remove("hidden"); }
-$("closePlans").onclick = () => $("plans").classList.add("hidden");
-$("plans").onmousedown = (e) => { if (e.target === $("plans")) $("plans").classList.add("hidden"); };
-$("seePlans").onclick = openPlans;
+let gatePlans = false;
+function renderPlans() { renderPlanGrid($("plansGrid"), { current: plan.id, gate: gatePlans }); }
+function openPlans(gate) {
+  gatePlans = gate === true;                                    // gate = new account: must choose before using the app, can't be closed
+  $("plansTitle").textContent = gatePlans ? "Choose your plan to continue" : "Plans";
+  $("closePlans").hidden = gatePlans;
+  $("plansNote").textContent = gatePlans
+    ? "Paid plans open soon. Pick one now and we'll switch it on for your account the moment payments go live. You start on Free today, no card needed."
+    : "Paid plans open soon. Choose one and we'll switch it on for your account the moment payments go live. Until then you stay on your current plan.";
+  renderPlans(); $("plans").classList.remove("hidden");
+}
+function closePlans() { if (gatePlans) return; $("plans").classList.add("hidden"); }
+async function gateChoose(id) {
+  try {
+    const d = await api("/api/plan/choose", { method: "POST", body: { plan: id } });
+    plan = d.plan; gatePlans = false; $("plans").classList.add("hidden"); renderPlanSettings();
+    toast(id === "free" ? "You're on Free. Welcome aboard." : "Got it. You start on Free, and we'll switch on " + (config.plans.find((p) => p.id === id)?.name || "your plan") + " when payments open.");
+  } catch (e) { toast(e.message, "err"); }
+}
+$("closePlans").onclick = closePlans;
+$("plans").onmousedown = (e) => { if (e.target === $("plans")) closePlans(); };
+$("seePlans").onclick = () => openPlans(false);
 function renderPlanSettings() {
   const p = config.plans.find((x) => x.id === plan.id) || { name: "Free" };
-  $("planName").textContent = p.name + (plan.owner ? " (owner)" : "");
+  $("planName").textContent = user?.dev ? "Developer" : p.name + (plan.owner ? " (owner)" : "");
   const req = plan.requested ? ` Requested: ${config.plans.find((x) => x.id === plan.requested)?.name}, switches on when payments open.` : "";
   const box = $("usageBox");
   if (plan.id === "free") {
@@ -395,7 +413,7 @@ function renderPlanSettings() {
     $("usageFill").style.width = pct + "%"; $("usageFill").classList.toggle("hot", pct >= 85);
     $("usageTxt").textContent = `${plan.usedClaude} of ${config.plusClaudeMsgs} Claude messages used today.`;
   } else {
-    $("planSub").textContent = (plan.id === "max" ? "Everything, unlimited." : "Unlimited Gemini.") + req;
+    $("planSub").textContent = (user?.dev ? "Dev account: full access, no limits." : plan.id === "max" ? "Everything, unlimited." : "Unlimited Gemini.") + req;
     box.hidden = true;
   }
 }
@@ -1018,7 +1036,7 @@ function buildModelMenu() {
     b.querySelector(".nm").textContent = n; b.querySelector(".ds").textContent = d;
     if (modelLocked(o.value)) { b.classList.add("locked"); b.querySelector(".txt").insertAdjacentHTML("afterend", `<span class="lockTag">${plan.id === "plus" ? "Max" : "Plus"}</span>`); }
     b.onclick = () => {
-      if (modelLocked(o.value)) { toggleDD(false); toast((plan.id === "plus" ? "Opus is part of the Max plan." : "Claude is part of Plus and Max.") + " Opening plans."); openPlans(); return; } els.model.value = o.value; syncModelUI(); els.model.onchange(); toggleDD(false); dd.btn.focus(); };
+      if (modelLocked(o.value)) { toggleDD(false); toast((plan.id === "plus" ? "Opus is part of the Max plan." : "Claude is part of Plus and Max.") + " Opening plans."); openPlans(false); return; } els.model.value = o.value; syncModelUI(); els.model.onchange(); toggleDD(false); dd.btn.focus(); };
     dd.menu.appendChild(b);
   });
   syncModelUI();
@@ -1166,6 +1184,34 @@ $("clearAll").onclick = async () => {
     chats = []; startNew(); closeSettings(true); toast("All chats deleted.");
   } catch (err) { toast(err.message, "err"); }
 };
+$("nukeBtn").onclick = async () => {
+  if (!user?.dev) return;
+  const ok1 = await dialog({
+    title: "Take NEON AI offline?",
+    message: "Warning: this shuts the ENTIRE website down for everyone, on freestudyresources.org and the Render address. Nobody can sign in or chat, and that includes you.",
+    ok: "I understand, continue", danger: true,
+  });
+  if (!ok1) return;
+  const ok2 = await dialog({
+    title: "Are you absolutely sure?",
+    message: "The site stays off until you ask Claude to turn it back on. There is no button on the website to undo this, and you can't get back in while it's off.",
+    ok: "Yes, keep going", danger: true,
+  });
+  if (!ok2) return;
+  const typed = await dialog({
+    title: "Final confirmation",
+    message: "Type NUKE in capital letters to shut everything down now.",
+    input: "", placeholder: "NUKE", ok: "Shut it all down", danger: true,
+  });
+  if (typed === null) return;
+  if (typed !== "NUKE") { toast("That wasn't NUKE. Nothing was shut down.", "err"); return; }
+  try {
+    await api("/api/dev/nuke", { method: "POST", body: { confirm: "NUKE" }, noAuthRedirect: true });
+    closeSettings(true);
+    document.body.innerHTML = '<div style="position:fixed;inset:0;display:grid;place-items:center;background:#12062b;color:#f6e9ff;font-family:system-ui,sans-serif;text-align:center;padding:24px"><div><h1 style="letter-spacing:.2em;margin:0 0 10px;color:#ff5fd8">NEON AI</h1><p style="margin:0;color:#c9b4e8">The site is now offline. Ask Claude to turn it back on.</p></div></div>';
+  } catch (err) { toast(err.message, "err"); }
+};
+
 $("deleteAcct").onclick = async () => {
   // warning 1: are you sure?
   const first = await dialog({
@@ -1232,7 +1278,7 @@ async function enterApp(data) {
   config.models.forEach((m) => { const o = new Option(m.name, m.id); o.dataset.provider = m.provider; els.model.add(o); });
   const okModel = (id) => config.models.some((m) => m.id === id) && !modelLocked(id);
   els.model.value = okModel(settings.model) ? settings.model : okModel(config.defaultModel) ? config.defaultModel : (config.models.find((m) => !modelLocked(m.id)) || config.models[0]).id;
-  buildModelMenu(); renderPlanSettings();
+  buildModelMenu(); renderPlanSettings(); $("devSec").hidden = !user.dev;
   if (config.hasKey === false) $("emptyMsg").textContent = "The server has no ANTHROPIC_API_KEY yet. Add it in Render's environment settings.";
   els.search.value = "";
   current = null;
@@ -1243,6 +1289,7 @@ async function enterApp(data) {
   retitleOld();
   clearInterval(syncTimer);
   syncTimer = setInterval(syncNow, 25000);
+  if (!plan.chosen && !user.dev) openPlans(true);               // first time in: the plan pop-up comes before anything else
 }
 
 (async function init() {
