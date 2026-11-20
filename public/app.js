@@ -20,7 +20,7 @@ let config = { models: [], defaultModel: "", plans: [], freeTokens: 50000, plusC
 let user = null;
 let plan = { id: "free", requested: null, owner: false, usedTokens: 0, usedClaude: 0 };
 const readLook = () => { try { return JSON.parse(localStorage.getItem("neon-look") || "{}") || {}; } catch { return {}; } };
-let settings = { system: "", model: "", effort: 1, retro: false, bg: true, flicker: true, gfx: readLook().gfx === "gpu" ? "gpu" : "cpu" };
+let settings = { system: "", model: "", effort: 1, retro: true, bg: true, flicker: true, gfx: readLook().gfx === "gpu" ? "gpu" : "cpu" };
 let chats = [];          // metadata list for the sidebar: {id,title,model,created,updated}
 let current = null;      // active chat (full object incl. messages)
 let pending = [];        // attachments waiting to be sent
@@ -83,13 +83,6 @@ async function api(path, opts = {}) {
 let mode = "login";
 let step = 1;
 const SPRING = "cubic-bezier(.3, 1.25, .4, 1)";
-// liquid-glass squish of the whole card whenever its shape changes
-function squish() {
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  $("authCard").animate([
-    { transform: "scale(1)" }, { transform: "scale(1.022, .978)", offset: .3 }, { transform: "scale(.992, 1.012)", offset: .62 }, { transform: "scale(1)" },
-  ], { duration: 760, easing: "ease-in-out" });
-}
 let lblTxt = "";
 function syncStep(animate) {
   const lbl = authEls.btn.querySelector(".lbl"), t = mode === "login" ? "Sign in" : step === 1 ? "Next" : "Create account";
@@ -115,7 +108,6 @@ function goStep(n, instant) {
   const h0 = wrap.offsetHeight;
   wrap.style.height = h0 + "px"; wrap.classList.add("morphing");
   from.className = "step " + (fwd ? "out-fwd" : "out-back");
-  squish();
   setTimeout(() => {
     from.hidden = true; from.className = "step";
     to.hidden = false; to.className = "step " + (fwd ? "in-fwd" : "in-back");
@@ -130,7 +122,6 @@ $("backBtn").onclick = () => goStep(1);
 const authEls = { form: $("authForm"), user: $("username"), pass: $("password"), err: $("authErr"), btn: $("authSubmit") };
 
 function setMode(m, instant) {
-  const changed = m !== mode;
   mode = m;
   document.querySelector(".tabs").dataset.mode = m;
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.mode === m));
@@ -138,7 +129,6 @@ function setMode(m, instant) {
   $("strengthC").classList.toggle("open", m === "signup");
   $("stepperC").classList.toggle("open", m === "signup");
   if (step !== 1) goStep(1, instant); else syncStep(!instant);
-  if (!instant && changed) squish();
   authEls.err.textContent = "";
   document.querySelectorAll(".field.bad").forEach((f) => f.classList.remove("bad"));
 }
@@ -1102,7 +1092,7 @@ addEventListener("focus", syncNow);
 
 // ---------- boot ----------
 async function enterApp(data) {
-  user = data.user; plan = data.plan || plan; settings = { system: "", model: "", effort: config.defaultEffort ?? 1, retro: false, bg: true, flicker: true, ...(data.settings || {}), gfx: readLook().gfx === "gpu" ? "gpu" : "cpu" };
+  user = data.user; plan = data.plan || plan; settings = { system: "", model: "", effort: config.defaultEffort ?? 1, retro: true, bg: true, flicker: true, ...(data.settings || {}), gfx: readLook().gfx === "gpu" ? "gpu" : "cpu" };
   $("auth").classList.add("hidden"); $("app").classList.remove("hidden"); document.body.classList.add("in-app"); applyLook();
   $("meName").textContent = user.username; $("meAvatar").textContent = user.username[0];
   $("setName").textContent = user.username; $("setAvatar").textContent = user.username[0];

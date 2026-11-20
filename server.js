@@ -265,7 +265,7 @@ app.put("/api/settings", requireAuth, small, wrap(async (req, res) => {
     system: typeof system === "string" ? system.slice(0, 4000) : cur.system || "",
     model: model === undefined ? cur.model || "" : MODELS.some((m) => m.id === model) ? model : "",
     effort: [0, 1, 2, 3].includes(effort) ? effort : [0, 1, 2, 3].includes(cur.effort) ? cur.effort : DEFAULT_EFFORT,
-    retro: bool(retro, { key: "retro", def: false }),
+    retro: bool(retro, { key: "retro", def: true }),
     bg: bool(bg, { key: "bg", def: true }),
     flicker: bool(flicker, { key: "flicker", def: true }),
   };

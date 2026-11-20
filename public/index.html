@@ -8,7 +8,7 @@
 <script>
 try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = document.documentElement;
   R.dataset.gfx = L.gfx === "gpu" ? "gpu" : "cpu";   // graphics mode is per device; CPU unless you picked GPU here
-  if (L.retro) R.dataset.theme = "retro"; if (L.bg === false) R.classList.add("no-bg-anim"); if (L.flicker === false) R.classList.add("no-flicker"); } catch (e) { document.documentElement.dataset.gfx = "cpu"; }
+  if (L.retro !== false) R.dataset.theme = "retro"; if (L.bg === false) R.classList.add("no-bg-anim"); if (L.flicker === false) R.classList.add("no-flicker"); } catch (e) { document.documentElement.dataset.gfx = "cpu"; document.documentElement.dataset.theme = "retro"; }
 </script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300e5ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13 2 3 14h9l-1 8 10-12h-9Z'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
