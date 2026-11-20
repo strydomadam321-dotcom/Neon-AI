@@ -1156,3 +1156,6 @@ body.in-app .rs-dim { opacity: 1; }
 .wn-item { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; background: rgba(var(--deep), .5); border: 1px solid var(--line); font-size: 13.5px; line-height: 1.5; animation: lpUp .5s cubic-bezier(.2, .9, .25, 1) both; }
 .wn-ic { font-size: 19px; line-height: 1.3; flex: none; } .wn-tx b { color: #fff; }
 .wn-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+.wn-foot .btn { padding: 7px 20px; min-height: 0; height: 36px; font-size: 14px; border-radius: 11px; }
+.wn-item { line-height: 1.7; }
+.wn-foot .btn.primary, .wn-foot .btn.primary .lbl { color: #12041a; font-weight: 700; opacity: 1; }
