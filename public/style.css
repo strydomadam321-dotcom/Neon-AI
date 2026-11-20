@@ -812,3 +812,12 @@ body.in-app .rs-dim { opacity: 1; }
 
 .avatar.has-pic { background: none; padding: 0; overflow: hidden; }
 .avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
+
+.collapse.plain .collapse-in > * { animation: none; }
+#tabsC .collapse-in { overflow: visible; }
+#tabsC:not(.open) .collapse-in { overflow: hidden; }
+.forgot-row { display: flex; justify-content: flex-end; margin: -2px 2px 12px; font-size: 13px; }
+
+/* closed sections can't be focused or read by screen readers once they've finished collapsing */
+.collapse:not(.open) .collapse-in { visibility: hidden; transition: visibility 0s .6s; }
+.collapse.open .collapse-in { visibility: visible; transition: none; }

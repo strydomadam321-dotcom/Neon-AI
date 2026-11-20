@@ -125,11 +125,11 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
     <div class="auth-logo"><span class="neon-logo flick" data-text="NEON AI">NEON AI</span></div>
     <p class="auth-sub">Your private AI workspace. Pick up any chat, on any device.</p>
 
-    <div class="tabs" role="tablist">
+    <div class="collapse open plain" id="tabsC"><div class="collapse-in"><div class="tabs" role="tablist">
       <button type="button" class="tab active" data-mode="login" role="tab">Sign in</button>
       <button type="button" class="tab" data-mode="signup" role="tab">Create account</button>
       <span class="tab-ink"></span>
-    </div>
+    </div></div></div>
 
     <form id="authForm" novalidate autocomplete="on">
       <div class="collapse" id="stepperC"><div class="collapse-in"><div class="stepper" id="stepper"><i class="on"></i><i></i><span id="stepTxt">Step 1 of 2</span></div></div></div>
@@ -137,7 +137,7 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
       <div id="step1" class="step">
       <label class="field" id="fUser">
         <svg class="ic"><use href="#i-user"/></svg>
-        <input id="username" name="username" type="text" placeholder="Username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="24">
+        <input id="username" name="username" type="text" placeholder="Username or email" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="24">
       </label>
       <label class="field" id="fPass">
         <svg class="ic"><use href="#i-lock"/></svg>
@@ -148,6 +148,7 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
         <div class="bars"><i></i><i></i><i></i><i></i></div>
         <span id="strengthTxt">At least 8 characters</span>
       </div></div></div>
+      <div class="collapse" id="forgotC"><div class="collapse-in"><div class="forgot-row"><button type="button" class="linkbtn" id="forgotBtn">Forgot password?</button></div></div></div>
       <label class="check">
         <input type="checkbox" id="remember" checked>
         <span class="box"><svg class="ic"><use href="#i-check"/></svg></span>
@@ -180,6 +181,35 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
           <input class="otp-i" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Digit 6">
         </div>
         <p class="resend"><span id="resendTxt"></span><button type="button" class="linkbtn" id="resendBtn" hidden>Resend code</button></p>
+      </div>
+
+      <div id="step4" class="step" hidden>
+        <button type="button" class="back" id="backBtn4"><svg class="ic"><use href="#i-back"/></svg>Back</button>
+        <h4 class="s2-title">Reset your password</h4>
+        <p class="s2-sub">Enter the email you signed up with and we'll send you a 6-digit code.</p>
+        <label class="field" id="fEmailR">
+          <svg class="ic"><use href="#i-mail"/></svg>
+          <input id="emailR" type="email" placeholder="Email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="120">
+        </label>
+      </div>
+
+      <div id="step5" class="step" hidden>
+        <button type="button" class="back" id="backBtn5"><svg class="ic"><use href="#i-back"/></svg>Back</button>
+        <h4 class="s2-title">Check your email</h4>
+        <p class="s2-sub" id="resetSub"></p>
+        <div class="otp" id="otp2" role="group" aria-label="6-digit reset code">
+          <input class="otp-i" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" aria-label="Digit 1">
+          <input class="otp-i" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Digit 2">
+          <input class="otp-i" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Digit 3">
+          <input class="otp-i" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Digit 4">
+          <input class="otp-i" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Digit 5">
+          <input class="otp-i" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="Digit 6">
+        </div>
+        <label class="field" id="fNewPass">
+          <svg class="ic"><use href="#i-lock"/></svg>
+          <input id="newpass" type="password" placeholder="New password" autocomplete="new-password" maxlength="72">
+        </label>
+        <p class="resend"><span id="resendTxt2"></span><button type="button" class="linkbtn" id="resendBtn2" hidden>Resend code</button></p>
       </div>
       </div>
 

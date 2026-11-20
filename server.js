@@ -131,6 +131,13 @@ alter table users add column if not exists has_password boolean not null default
 create unique index if not exists users_google_uq on users(google_sub);
 alter table users add column if not exists email_norm text;
 alter table users add column if not exists avatar text;
+create table if not exists password_resets(
+  user_id int primary key references users(id) on delete cascade,
+  code_hash text not null,
+  attempts int not null default 0,
+  expires_at timestamptz not null,
+  sent_at timestamptz not null default now()
+);
 create table if not exists google_pending(
   state text primary key,
   username text,
@@ -261,17 +268,18 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const codeHash = (em, code) => sha(`${em}:${code}:${process.env.CODE_PEPPER || "neon"}`);
 const maskEmail = (em) => { const [l, d] = em.split("@"); return (l.length <= 2 ? l[0] + "*" : l[0] + "*".repeat(Math.min(5, l.length - 2)) + l.slice(-1)) + "@" + d; };
 
-async function sendCodeEmail(to, code) {
-  if (!RESEND_KEY) { console.log(`[mail debug] code for ${to}: ${code}`); return; }
+async function sendCodeEmail(to, code, kind = "signup") {
+  const reset = kind === "reset";
+  if (!RESEND_KEY) { console.log(`[mail debug] ${kind} code for ${to}: ${code}`); return; }
   const html = `<div style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:420px;margin:0 auto;padding:28px;color:#111">
-    <h2 style="margin:0 0 6px;font-size:20px">Verify your email</h2>
-    <p style="margin:0 0 18px;color:#555">Use this code to finish creating your NEON AI account.</p>
+    <h2 style="margin:0 0 6px;font-size:20px">${reset ? "Reset your password" : "Verify your email"}</h2>
+    <p style="margin:0 0 18px;color:#555">${reset ? "Use this code to choose a new password for your NEON AI account." : "Use this code to finish creating your NEON AI account."}</p>
     <div style="font-size:34px;letter-spacing:10px;font-weight:700;background:#f3f1ff;border-radius:12px;padding:16px 0;text-align:center;font-family:ui-monospace,Menlo,Consolas,monospace">${code}</div>
-    <p style="margin:18px 0 0;color:#777;font-size:13px">This code expires in 10 minutes. If you didn't try to sign up, you can ignore this email.</p></div>`;
+    <p style="margin:18px 0 0;color:#777;font-size:13px">This code expires in 10 minutes. ${reset ? "If you didn't ask to reset your password, you can ignore this email: your password hasn't changed." : "If you didn't try to sign up, you can ignore this email."}</p></div>`;
   const r = await fetch(RESEND_URL, {
     method: "POST", signal: AbortSignal.timeout(15000),
     headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: MAIL_FROM, to: [to], subject: `${code} is your NEON AI verification code`, html, text: `Your NEON AI verification code is ${code}. It expires in 10 minutes.` }),
+    body: JSON.stringify({ from: MAIL_FROM, to: [to], subject: reset ? `${code} is your NEON AI password reset code` : `${code} is your NEON AI verification code`, html, text: `Your NEON AI ${reset ? "password reset" : "verification"} code is ${code}. It expires in 10 minutes.` }),
   });
   if (!r.ok) { const t = await r.text().catch(() => ""); throw new Error(`Resend ${r.status}: ${t.slice(0, 200)}`); }
 }
@@ -434,16 +442,68 @@ app.get("/api/auth/google/callback", wrap(async (req, res) => {
 
 app.post("/api/login", small, wrap(async (req, res) => {
   const { username, password, remember } = req.body || {};
-  if (typeof username !== "string" || typeof password !== "string") return res.status(400).json({ error: "Enter your username and password." });
-  const key = "login:" + req.ip + ":" + username.toLowerCase();
+  if (typeof username !== "string" || typeof password !== "string") return res.status(400).json({ error: "Enter your username or email and your password." });
+  const id = username.trim().slice(0, 120);
+  const key = "login:" + req.ip + ":" + id.toLowerCase();
   if (limited(key, 8, 15 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again in a few minutes." });
-  const { rows } = await q("select id,username,pass_hash,settings,plan,plan_requested,has_password,avatar from users where username_lc = $1", [username.toLowerCase()]);
+  // an email works as a second username (usernames can't contain "@", so the two never clash)
+  const cols = "id,username,pass_hash,settings,plan,plan_requested,has_password,avatar";
+  const { rows } = id.includes("@")
+    ? await q(`select ${cols} from users where email_norm = $1`, [normEmail(id)])
+    : await q(`select ${cols} from users where username_lc = $1`, [id.toLowerCase()]);
   const user = rows[0];
   const ok = await bcrypt.compare(password.slice(0, 200), user ? user.pass_hash : DUMMY_HASH);
-  if (!user || !ok) return res.status(401).json({ error: "Wrong username or password." });
+  if (!user || !ok) return res.status(401).json({ error: "Wrong username, email or password." });
   hits.delete(key);
   await startSession(req, res, user.id, !!remember);
   res.json(await mePayload(user));
+}));
+
+// ---------- forgot password (only accounts that have a password; the answer never reveals whether an email has an account) ----------
+const newCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+app.post("/api/password/forgot", small, wrap(async (req, res) => {
+  if (limited("pwf:" + req.ip, 10, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
+  const email = String(req.body?.email || "").trim();
+  if (!EMAIL_RE.test(email) || email.length > 120) return res.status(400).json({ error: "Enter a valid email address.", field: "email" });
+  if (!MAIL_READY) return res.status(503).json({ error: "Password reset isn't available yet.", field: "email" });
+  const norm = normEmail(email);
+  if (!limited("pwfm:" + norm, 5, 60 * 60e3)) {
+    const u = (await q("select id, email from users where email_norm = $1 and has_password", [norm])).rows[0];
+    if (u) {
+      const cur = (await q("select sent_at from password_resets where user_id = $1", [u.id])).rows[0];
+      if (!cur || Date.now() - new Date(cur.sent_at).getTime() >= RESEND_COOLDOWN_MS) {
+        const code = newCode();
+        await q(`insert into password_resets(user_id,code_hash,attempts,expires_at,sent_at) values($1,$2,0,$3,now())
+                 on conflict(user_id) do update set code_hash=$2, attempts=0, expires_at=$3, sent_at=now()`, [u.id, codeHash(norm, code), new Date(Date.now() + CODE_MS)]);
+        sendCodeEmail(u.email, code, "reset").catch((e) => console.error("reset email failed:", e.message));   // not awaited, so response time doesn't reveal whether the email has an account
+      }
+    }
+  }
+  res.json({ sent: true, cooldown: RESEND_COOLDOWN_MS / 1000 });
+}));
+
+app.post("/api/password/reset", small, wrap(async (req, res) => {
+  if (limited("pwr:" + req.ip, 30, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
+  const email = String(req.body?.email || "").trim(), code = String(req.body?.code || "").replace(/\D/g, ""), password = req.body?.password;
+  if (code.length !== 6) return res.status(400).json({ error: "Enter the 6-digit code.", field: "code" });
+  if (typeof password !== "string" || password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters.", field: "password" });
+  if (Buffer.byteLength(password) > 72) return res.status(400).json({ error: "Password is too long (72 bytes max).", field: "password" });
+  const norm = normEmail(email);
+  const u = (await q("select id,username,settings,plan,plan_requested,has_password,avatar from users where email_norm = $1 and has_password", [norm])).rows[0];
+  const r = u ? (await q("select * from password_resets where user_id = $1", [u.id])).rows[0] : null;
+  const dead = { error: "That code isn't right or has expired. Tap Resend to get a new one.", field: "code", expired: true };
+  if (!r || new Date(r.expires_at) < new Date() || r.attempts >= MAX_CODE_TRIES) return res.status(400).json(dead);
+  const a = Buffer.from(codeHash(norm, code)), b = Buffer.from(r.code_hash);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    const left = MAX_CODE_TRIES - r.attempts - 1;
+    await q("update password_resets set attempts = attempts + 1 where user_id = $1", [u.id]);
+    return res.status(400).json(left > 0 ? { error: `That code isn't right. ${left} ${left === 1 ? "try" : "tries"} left.`, field: "code" } : dead);
+  }
+  await q("update users set pass_hash = $1 where id = $2", [await bcrypt.hash(password, 11), u.id]);
+  await q("delete from password_resets where user_id = $1", [u.id]);
+  await q("delete from sessions where user_id = $1", [u.id]);     // anyone signed in with the old password is signed out
+  await startSession(req, res, u.id, !!req.body?.remember);
+  res.json(await mePayload(u));
 }));
 
 app.post("/api/logout", wrap(async (req, res) => {

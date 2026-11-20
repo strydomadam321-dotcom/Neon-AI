@@ -85,7 +85,7 @@ let step = 1;
 const SPRING = "cubic-bezier(.3, 1.25, .4, 1)";
 let lblTxt = "";
 function syncStep(animate) {
-  const lbl = authEls.btn.querySelector(".lbl"), t = mode === "login" ? "Sign in" : step === 1 ? "Next" : step === 2 ? "Create account" : "Verify";
+  const lbl = authEls.btn.querySelector(".lbl"), t = step === 4 ? "Send code" : step === 5 ? "Reset password" : mode === "login" ? "Sign in" : step === 1 ? "Next" : step === 2 ? "Create account" : "Verify";
   if (t !== lblTxt) {
     if (animate && lblTxt) {
       const out = lbl.animate([{ opacity: 1, filter: "blur(0)", transform: "translateY(0)" }, { opacity: 0, filter: "blur(4px)", transform: "translateY(-6px)" }], { duration: 140, fill: "forwards" });
@@ -96,6 +96,8 @@ function syncStep(animate) {
     } else lbl.textContent = t;
     lblTxt = t;
   }
+  $("tabsC").classList.toggle("open", step < 4);                       // the reset screens replace the tabs
+  $("gLoginC").classList.toggle("open", mode === "login" && step < 4);
   document.querySelectorAll("#stepper i").forEach((d, i) => d.classList.toggle("on", i < Math.min(step, 2)));
   $("stepTxt").textContent = `Step ${Math.min(step, 2)} of 2`;   // the code screen is not shown as a third step (Google users skip it)
 }
@@ -115,47 +117,58 @@ function goStep(n, instant) {
     wrap.style.height = h1 + "px";
     const an = wrap.animate([{ height: h0 + "px" }, { height: h1 + "px" }], { duration: 700, easing: SPRING });
     an.onfinish = an.oncancel = () => { wrap.style.height = ""; wrap.classList.remove("morphing"); };
-    (n === 3 ? otpBoxes[0] : n === 2 ? $("email") : authEls.user).focus({ preventScroll: true });
+    (n === 5 ? otpR.boxes[0] : n === 4 ? $("emailR") : n === 3 ? otpS.boxes[0] : n === 2 ? $("email") : authEls.user).focus({ preventScroll: true });
   }, 230);
 }
 $("backBtn").onclick = () => goStep(1);
-$("backBtn3").onclick = () => { clearInterval(resendTimer); goStep(2); };
+$("backBtn3").onclick = () => { clearInterval(timers[""]); goStep(2); };
+$("backBtn4").onclick = () => goStep(1);
+$("backBtn5").onclick = () => { clearInterval(timers["2"]); goStep(4); };
 
-// ---------- 6-digit code boxes ----------
-const otpBoxes = [...document.querySelectorAll(".otp-i")];
-const otpCode = () => otpBoxes.map((b) => b.value).join("");
-function otpClear() { otpBoxes.forEach((b) => { b.value = ""; b.classList.remove("filled"); }); $("otp").classList.remove("bad"); }
-function otpFill(digits, from = 0) {
-  const d = String(digits).replace(/\D/g, "").slice(0, 6 - from);
-  [...d].forEach((c, i) => { const b = otpBoxes[from + i]; b.value = c; b.classList.add("filled"); });
-  const next = Math.min(from + d.length, 5);
-  otpBoxes[next].focus();
-  if (otpCode().length === 6) setTimeout(() => authEls.form.requestSubmit(), 180);   // all six in: verify right away
+// ---------- 6-digit code boxes (used for sign-up verification and for password reset) ----------
+function makeOtp(root, onComplete) {
+  const boxes = [...root.querySelectorAll(".otp-i")];
+  const o = {
+    boxes, root,
+    code: () => boxes.map((b) => b.value).join(""),
+    clear() { boxes.forEach((b) => { b.value = ""; b.classList.remove("filled"); }); root.classList.remove("bad"); },
+    shake() { root.classList.remove("bad"); void root.offsetWidth; root.classList.add("bad"); },
+    fill(digits, from = 0) {
+      const d = String(digits).replace(/\D/g, "").slice(0, 6 - from);
+      [...d].forEach((c, i) => { const b = boxes[from + i]; b.value = c; b.classList.add("filled"); });
+      boxes[Math.min(from + d.length, 5)].focus();
+      if (o.code().length === 6) setTimeout(onComplete, 180);
+    },
+  };
+  boxes.forEach((b, i) => {
+    b.addEventListener("input", () => {
+      root.classList.remove("bad"); authEls.err.textContent = "";
+      const v = b.value.replace(/\D/g, "");
+      if (v.length > 1) { b.value = ""; o.fill(v, i); return; }          // autofill / fast typing dropped several digits in one box
+      b.value = v; b.classList.toggle("filled", !!v);
+      if (v) { if (i < 5) boxes[i + 1].focus(); if (o.code().length === 6) setTimeout(onComplete, 180); }
+    });
+    b.addEventListener("keydown", (e) => {
+      if (e.key === "Backspace" && !b.value && i > 0) { boxes[i - 1].value = ""; boxes[i - 1].classList.remove("filled"); boxes[i - 1].focus(); e.preventDefault(); }
+      else if (e.key === "ArrowLeft" && i > 0) { boxes[i - 1].focus(); e.preventDefault(); }
+      else if (e.key === "ArrowRight" && i < 5) { boxes[i + 1].focus(); e.preventDefault(); }
+    });
+    b.addEventListener("paste", (e) => { e.preventDefault(); const t = (e.clipboardData || window.clipboardData).getData("text"); if (/\d/.test(t)) o.fill(t, 0); });
+    b.addEventListener("focus", () => b.select());
+  });
+  return o;
 }
-otpBoxes.forEach((b, i) => {
-  b.addEventListener("input", () => {
-    $("otp").classList.remove("bad"); authEls.err.textContent = "";
-    const v = b.value.replace(/\D/g, "");
-    if (v.length > 1) { b.value = ""; otpFill(v, i); return; }          // autofill / fast typing dropped several digits in one box
-    b.value = v; b.classList.toggle("filled", !!v);
-    if (v) { if (i < 5) otpBoxes[i + 1].focus(); if (otpCode().length === 6) setTimeout(() => authEls.form.requestSubmit(), 180); }
-  });
-  b.addEventListener("keydown", (e) => {
-    if (e.key === "Backspace" && !b.value && i > 0) { otpBoxes[i - 1].value = ""; otpBoxes[i - 1].classList.remove("filled"); otpBoxes[i - 1].focus(); e.preventDefault(); }
-    else if (e.key === "ArrowLeft" && i > 0) { otpBoxes[i - 1].focus(); e.preventDefault(); }
-    else if (e.key === "ArrowRight" && i < 5) { otpBoxes[i + 1].focus(); e.preventDefault(); }
-  });
-  b.addEventListener("paste", (e) => { e.preventDefault(); const t = (e.clipboardData || window.clipboardData).getData("text"); if (/\d/.test(t)) otpFill(t, 0); });
-  b.addEventListener("focus", () => b.select());
-});
-let resendTimer = 0, signupEmail = "";
-function startResendCooldown(sec) {
-  clearInterval(resendTimer);
-  const txt = $("resendTxt"), btn = $("resendBtn"); let left = sec;
+const otpS = makeOtp($("otp"), () => authEls.form.requestSubmit());      // sign-up: all six in, verify right away
+const otpR = makeOtp($("otp2"), () => $("newpass").focus());              // reset: now they pick the new password
+const timers = {};
+let signupEmail = "", resetEmail = "";
+function startResendCooldown(sec, sfx = "") {
+  clearInterval(timers[sfx]);
+  const txt = $("resendTxt" + sfx), btn = $("resendBtn" + sfx); let left = sec;
   btn.hidden = true; txt.textContent = `Didn't get it? Resend in ${left}s`;
-  resendTimer = setInterval(() => {
+  timers[sfx] = setInterval(() => {
     left--;
-    if (left <= 0) { clearInterval(resendTimer); txt.textContent = "Didn't get it?"; btn.hidden = false; }
+    if (left <= 0) { clearInterval(timers[sfx]); txt.textContent = "Didn't get it?"; btn.hidden = false; }
     else txt.textContent = `Didn't get it? Resend in ${left}s`;
   }, 1000);
 }
@@ -163,9 +176,17 @@ $("resendBtn").onclick = async () => {
   $("resendBtn").disabled = true;
   try {
     const d = await api("/api/signup/resend", { method: "POST", noAuthRedirect: true, body: { email: signupEmail } });
-    otpClear(); otpBoxes[0].focus(); authEls.err.textContent = ""; startResendCooldown(d.cooldown || 30); toast("New code sent.");
+    otpS.clear(); otpS.boxes[0].focus(); authEls.err.textContent = ""; startResendCooldown(d.cooldown || 30); toast("New code sent.");
   } catch (e) { authEls.err.textContent = e.message; }
   finally { $("resendBtn").disabled = false; }
+};
+$("resendBtn2").onclick = async () => {
+  $("resendBtn2").disabled = true;
+  try {
+    const d = await api("/api/password/forgot", { method: "POST", noAuthRedirect: true, body: { email: resetEmail } });
+    otpR.clear(); otpR.boxes[0].focus(); authEls.err.textContent = ""; startResendCooldown(d.cooldown || 30, "2"); toast("New code sent, if that email has an account.");
+  } catch (e) { authEls.err.textContent = e.message; }
+  finally { $("resendBtn2").disabled = false; }
 };
 async function googleGo() {
   if (!config.hasGoogle) { toast("Google sign-in isn't set up yet.", "err"); return; }
@@ -195,9 +216,10 @@ function setMode(m, instant) {
   document.querySelector(".tabs").dataset.mode = m;
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.mode === m));
   authEls.pass.autocomplete = m === "login" ? "current-password" : "new-password";
+  authEls.user.placeholder = m === "login" ? "Username or email" : "Username";
+  $("forgotC").classList.remove("open");
   $("strengthC").classList.toggle("open", m === "signup");
   $("stepperC").classList.toggle("open", m === "signup");
-  $("gLoginC").classList.toggle("open", m === "login");
   if (step !== 1) goStep(1, instant); else syncStep(!instant);
   authEls.err.textContent = "";
   document.querySelectorAll(".field.bad").forEach((f) => f.classList.remove("bad"));
@@ -231,19 +253,51 @@ function fieldErr(id, msg) {
   const f = $(id); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad");
   f.querySelector("input")?.focus();
 }
-["email", "username", "password"].forEach((id) => $(id).addEventListener("input", () => { $(id).closest(".field").classList.remove("bad"); authEls.err.textContent = ""; }));
+["email", "username", "password", "emailR", "newpass"].forEach((id) => $(id).addEventListener("input", () => { $(id).closest(".field").classList.remove("bad"); authEls.err.textContent = ""; }));
+
+// password reset: step 4 asks for the email, step 5 takes the code and the new password
+async function submitForgot() {
+  const email = $("emailR").value.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fieldErr("fEmailR", "Enter a valid email address.");
+  authEls.btn.classList.add("loading"); authEls.btn.disabled = true;
+  try {
+    const d = await api("/api/password/forgot", { method: "POST", noAuthRedirect: true, body: { email } });
+    resetEmail = email; otpR.clear(); $("newpass").value = "";
+    $("resetSub").textContent = `If ${email} belongs to an account with a password, a 6-digit code is on its way. Signed up with Google? Go back and use Continue with Google instead.`;
+    startResendCooldown(d.cooldown || 30, "2"); goStep(5);
+  } catch (err) { if (err.field === "email") fieldErr("fEmailR", err.message); else authEls.err.textContent = err.message; }
+  finally { authEls.btn.classList.remove("loading"); authEls.btn.disabled = false; }
+}
+async function submitReset() {
+  const pw = $("newpass").value;
+  if (otpR.code().length < 6) { otpR.shake(); authEls.err.textContent = "Enter the 6-digit code."; return; }
+  if (pw.length < 8) return fieldErr("fNewPass", "Password must be at least 8 characters.");
+  authEls.btn.classList.add("loading"); authEls.btn.disabled = true;
+  try {
+    const data = await api("/api/password/reset", { method: "POST", noAuthRedirect: true, body: { email: resetEmail, code: otpR.code(), password: pw, remember: $("remember").checked } });
+    $("newpass").value = ""; otpR.clear(); clearInterval(timers["2"]); authEls.pass.value = "";
+    await enterApp(data); toast("Password changed. You're signed in.");
+  } catch (err) {
+    if (err.field === "code") { otpR.clear(); otpR.shake(); authEls.err.textContent = err.message; if (!err.expired) otpR.boxes[0].focus(); }
+    else if (err.field === "password") fieldErr("fNewPass", err.message);
+    else authEls.err.textContent = err.message;
+  } finally { authEls.btn.classList.remove("loading"); authEls.btn.disabled = false; }
+}
+$("forgotBtn").onclick = () => { $("emailR").value = authEls.user.value.includes("@") ? authEls.user.value.trim() : ""; goStep(4); };
 
 authEls.form.onsubmit = async (e) => {
   e.preventDefault();
+  if (step === 4) return submitForgot();
+  if (step === 5) return submitReset();
   const username = authEls.user.value.trim(), password = authEls.pass.value;
-  if (!username) return fieldErr("fUser", "Enter a username.");
+  if (!username) return fieldErr("fUser", mode === "login" ? "Enter your username or email." : "Enter a username.");
   if (mode === "signup" && !/^[A-Za-z0-9_.-]{3,24}$/.test(username)) return fieldErr("fUser", "Username: 3-24 characters, letters, numbers, . _ -");
   if (!password) return fieldErr("fPass", "Enter your password.");
   if (mode === "signup" && password.length < 8) return fieldErr("fPass", "Password must be at least 8 characters.");
   if (mode === "signup" && step === 1) { goStep(2); return; }
   const email = $("email").value.trim();
   if (mode === "signup" && step === 2 && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fieldErr("fEmail", "Enter a valid email address.");
-  if (mode === "signup" && step === 3 && otpCode().length < 6) { $("otp").classList.remove("bad"); void $("otp").offsetWidth; $("otp").classList.add("bad"); authEls.err.textContent = "Enter the 6-digit code."; return; }
+  if (mode === "signup" && step === 3 && otpS.code().length < 6) { otpS.shake(); authEls.err.textContent = "Enter the 6-digit code."; return; }
   authEls.btn.classList.add("loading"); authEls.btn.disabled = true;
   try {
     let data;
@@ -252,20 +306,20 @@ authEls.form.onsubmit = async (e) => {
       // email route: send the code, then slide to the code screen
       const d = await api("/api/signup/start", { method: "POST", noAuthRedirect: true, body: { username, password, email } });
       signupEmail = email.toLowerCase(); $("codeSub").textContent = `We sent a 6-digit code to ${d.email}. It's valid for 10 minutes.`;
-      otpClear(); startResendCooldown(d.cooldown || 30); goStep(3);
+      otpS.clear(); startResendCooldown(d.cooldown || 30); goStep(3);
       return;
-    } else data = await api("/api/signup/verify", { method: "POST", noAuthRedirect: true, body: { email: signupEmail, code: otpCode(), remember: $("remember").checked } });
-    authEls.pass.value = ""; $("email").value = ""; otpClear(); clearInterval(resendTimer);
+    } else data = await api("/api/signup/verify", { method: "POST", noAuthRedirect: true, body: { email: signupEmail, code: otpS.code(), remember: $("remember").checked } });
+    authEls.pass.value = ""; $("email").value = ""; otpS.clear(); clearInterval(timers[""]);
     await enterApp(data);
     if (mode === "signup") toast("Account created. Welcome aboard.");
   } catch (err) {
     const map = { email: "fEmail", username: "fUser", password: "fPass" };
-    if (err.field === "code") { otpClear(); void $("otp").offsetWidth; $("otp").classList.add("bad"); authEls.err.textContent = err.message; if (!err.expired) otpBoxes[0].focus(); }
+    if (err.field === "code") { otpS.clear(); otpS.shake(); authEls.err.textContent = err.message; if (!err.expired) otpS.boxes[0].focus(); }
     else if (map[err.field]) {
       if (mode === "signup" && step >= 2 && err.field !== "email") { goStep(1); setTimeout(() => fieldErr(map[err.field], err.message), 300); }
       else fieldErr(map[err.field], err.message);
     }
-    else { authEls.err.textContent = err.message; if (err.status === 401) { const f = $("fPass"); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad"); } }
+    else { authEls.err.textContent = err.message; if (err.status === 401) { const f = $("fPass"); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad"); if (mode === "login") $("forgotC").classList.add("open"); } }   // wrong details: offer "Forgot password?"
   } finally {
     authEls.btn.classList.remove("loading"); authEls.btn.disabled = false;
   }
