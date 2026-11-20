@@ -545,11 +545,22 @@ function attachmentsView(atts) {
   return wrap;
 }
 
-function errBlock(text) {
+function errBlock(text, m, chat) {
   const e = document.createElement("div");
   e.className = "msg-err";
-  e.innerHTML = icon("alert") + "<span></span>";
-  e.querySelector("span").textContent = text;
+  e.innerHTML = icon("alert") + '<div class="err-body"><span></span></div>';
+  const span = e.querySelector("span"); span.textContent = text;
+  // Gemini 3.6 Flash / 2.5 Flash overloaded: point to Flash-Lite, which almost always works, with a one-click switch
+  const slow = ["gemini-3.6-flash", "gemini-2.5-flash"];
+  if (/Gemini is overloaded/i.test(text) && slow.includes(m?.errModel || chat?.model) && config.models.some((x) => x.id === "gemini-3.5-flash-lite")) {
+    span.textContent = text + " Try Gemini 3.5 Flash-Lite instead, it's the most reliable.";
+    const b = document.createElement("button"); b.type = "button"; b.className = "err-switch"; b.textContent = "Switch to 3.5 Flash-Lite";
+    b.onclick = () => {
+      els.model.value = "gemini-3.5-flash-lite"; syncModelUI(); els.model.onchange();
+      b.textContent = "Switched"; b.disabled = true; toast("Switched to Gemini 3.5 Flash-Lite. Send your message again.");
+    };
+    e.querySelector(".err-body").appendChild(b);
+  }
   return e;
 }
 
@@ -570,7 +581,7 @@ function msgEl(m, idx, chat = current) {
   } else {
     if (m.text) bubble.appendChild(md(m.text));
     body.appendChild(bubble);
-    if (m.err) body.appendChild(errBlock(m.err));
+    if (m.err) body.appendChild(errBlock(m.err, m, chat));
     const act = document.createElement("div");
     act.className = "actions";
     if (m.text) {
@@ -664,6 +675,7 @@ async function streamReply() {
   els.empty.style.display = "none";
   scrollDown(true);
 
+  const usedModel = els.model.value;
   let text = "", raf = 0, errMsg = "";
   const paint = () => {
     raf = 0;
@@ -680,7 +692,7 @@ async function streamReply() {
     const res = await fetch("/api/chat", {
       method: "POST", signal: abortCtl.signal, credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: chat.messages, model: els.model.value, effort: settings.effort }),
+      body: JSON.stringify({ messages: chat.messages, model: usedModel, effort: settings.effort }),
     });
     if (res.status === 401) { showAuth("Your session expired. Please sign in again."); throw new Error("Not signed in"); }
     if (!res.ok || !res.body) { const j = await res.json().catch(() => ({})); throw new Error(j.error || `Request failed (${res.status})`); }
@@ -707,7 +719,7 @@ async function streamReply() {
   if (raf) cancelAnimationFrame(raf);
   setBusy(false); abortCtl = null;
   if (!user) return;
-  if (text || errMsg) chat.messages.push({ role: "assistant", text, ...(errMsg ? { err: errMsg } : {}) });
+  if (text || errMsg) chat.messages.push({ role: "assistant", text, ...(errMsg ? { err: errMsg, errModel: usedModel } : {}) });
   const saved = await persist(chat);
   if (current === chat) renderMessages();
   if (saved && !errMsg && text && chat.messages.length === 2) autoTitle(chat);
