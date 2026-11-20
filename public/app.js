@@ -1398,6 +1398,7 @@ function syncModelUI() {
   const o = els.model.selectedOptions[0];
   if (!o) return;
   dd.label.textContent = modelParts(o.text)[0];
+  try { sessionStorage.setItem("neon-model", o.value); } catch {}   // survives a refresh, but not closing the tab or browser
   dd.btn.style.setProperty("--c", styleFor(o.value)[0]);
   dd.btn.querySelector(".dd-dot").style.setProperty("--c", styleFor(o.value)[0]);
   syncEffortUI();
@@ -1630,14 +1631,15 @@ async function enterApp(data) {
   els.model.innerHTML = "";
   config.models.forEach((m) => { const o = new Option(m.name, m.id); o.dataset.provider = m.provider; els.model.add(o); });
   const okModel = (id) => config.models.some((m) => m.id === id) && !modelLocked(id);
-  els.model.value = okModel(config.defaultModel) ? config.defaultModel : okModel(settings.model) ? settings.model : (config.models.find((m) => !modelLocked(m.id)) || config.models[0]).id;
+  let kept = ""; try { kept = sessionStorage.getItem("neon-model") || ""; } catch {}   // a refresh keeps the model; a fresh open starts on the default
+  els.model.value = okModel(kept) ? kept : okModel(config.defaultModel) ? config.defaultModel : okModel(settings.model) ? settings.model : (config.models.find((m) => !modelLocked(m.id)) || config.models[0]).id;
   buildModelMenu(); renderPlanSettings(); $("devSec").hidden = !user.dev;
   if (config.hasKey === false) $("emptyMsg").textContent = "The server has no ANTHROPIC_API_KEY yet. Add it in Render's environment settings.";
   els.search.value = "";
   current = null;
   try { chats = (await api("/api/chats")).chats; } catch { chats = []; }
   const last = ls.get("neon-last-" + user.username);
-  bootOpen = true; try { if (last && chats.some((c) => c.id === last)) await openChat(last); else startNew(); } finally { bootOpen = false; }   // a refresh always starts on the default model, not the last chat's
+  bootOpen = true; try { if (last && chats.some((c) => c.id === last)) await openChat(last); else startNew(); } finally { bootOpen = false; }   // on page load the last chat does not change the model (a refresh keeps it, a fresh open uses the default)
   renderList();
   retitleOld();
   clearInterval(syncTimer);

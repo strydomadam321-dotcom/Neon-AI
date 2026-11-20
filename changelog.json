@@ -7,7 +7,7 @@
     "items": [
       {
         "icon": "🔧",
-        "text": "<b>Default model.</b> After a refresh, NEON AI now always starts on Gemini 3.5 Flash-Lite instead of the model your last chat used."
+        "text": "<b>Default model.</b> A fresh open of NEON AI now always starts on Gemini 3.5 Flash-Lite. Refreshing the page keeps the model you were using."
       }
     ]
   },
