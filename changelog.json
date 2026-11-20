@@ -3,11 +3,31 @@
     "version": "2.0",
     "date": "20 November 2026",
     "title": "NEON AI V2",
-    "tag": "New commands",
+    "tag": "Big update",
     "items": [
       {
         "icon": "⌨️",
-        "text": "<b>/chess</b> for playing chess against a bot you choose, from 100 to 2000, with a chatty opponent.<br><b>/larp</b> for practising trading with fake money, with a beginner tutorial you can skip."
+        "text": "<b>/chess</b> for playing chess against a bot you choose.<br><b>/larp</b> for practising trading with fake money, with a beginner tutorial you can skip."
+      },
+      {
+        "icon": "📊",
+        "text": "<b>Daily usage ring.</b> A ring beside your name shows how much of today's limit you have used. Click it for the details, and find the same info in Settings."
+      },
+      {
+        "icon": "📄",
+        "text": "<b>Make real files.</b> Ask for a PDF, Word, PowerPoint or Excel file and download the real thing, with a live preview first."
+      },
+      {
+        "icon": "💻",
+        "text": "<b>Code and web previews</b> in a safe panel, with fullscreen."
+      },
+      {
+        "icon": "🔐",
+        "text": "<b>Accounts.</b> Sign in with Google or an email code, reset your password, and pick a plan. The Free plan now has 25,000 Gemini tokens a day."
+      },
+      {
+        "icon": "✨",
+        "text": "<b>Smoother everything.</b> Nicer dropdowns, longer replies that continue on their own, and this update log."
       }
     ]
   }
