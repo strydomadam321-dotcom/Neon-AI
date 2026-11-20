@@ -1143,3 +1143,16 @@ body.in-app .rs-dim { opacity: 1; }
 .lp-dd .dd-item { padding: 8px 10px; gap: 9px; font-size: 13px; color: #fff; }
 .lp-dd .dd-item .tick { width: 15px; height: 15px; margin-left: auto; }
 .lp-dd[data-v="buy"] .dd-btn { color: var(--ok); } .lp-dd[data-v="sell"] .dd-btn { color: var(--bad); }
+
+/* ---------- update log pop-up ---------- */
+.wn-card { width: min(520px, 100%); padding: 22px 24px 18px; max-height: min(88vh, 720px); display: flex; flex-direction: column; animation: popIn .5s cubic-bezier(.3, 1.25, .4, 1) both; }
+#whatsnew.out { animation: fadeout .25s both; } #whatsnew.out .wn-card { animation: menuout .25s ease-in both; }
+@keyframes fadeout { to { opacity: 0; } }
+.wn-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.wn-tag { font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; padding: 4px 10px; border-radius: 99px; color: #0b0220; background: linear-gradient(90deg, var(--cyan), var(--mag)); box-shadow: 0 0 18px rgba(var(--a1), .4); }
+.wn-card h2 { margin: 8px 0 2px; font-size: 26px; background: linear-gradient(90deg, #fff, var(--cyan)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.wn-meta { margin: 0 0 14px; color: var(--dim); font-size: 13px; }
+.wn-list { overflow: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
+.wn-item { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; background: rgba(var(--deep), .5); border: 1px solid var(--line); font-size: 13.5px; line-height: 1.5; animation: lpUp .5s cubic-bezier(.2, .9, .25, 1) both; }
+.wn-ic { font-size: 19px; line-height: 1.3; flex: none; } .wn-tx b { color: #fff; }
+.wn-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; flex-wrap: wrap; }

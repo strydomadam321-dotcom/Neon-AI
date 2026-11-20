@@ -82,6 +82,8 @@ Block layout: optional header lines first (title: My Title, and for neon-pptx op
 If the content itself contains code fences, open and close the outer block with four backticks. Use normal code blocks (html, python, ...) for code and web pages.`;
 
 // ---------- legal documents (legal/terms.html, legal/privacy.html) ----------
+// Update log shown to users once per new version (see changelog.json; newest entry first).
+const CHANGELOG = (() => { try { const j = JSON.parse(fs.readFileSync(path.join(__dirname, "changelog.json"), "utf8")); return Array.isArray(j) ? j : []; } catch { return []; } })();
 // Bump LEGAL_VERSION whenever the wording changes. CONTACT_EMAIL (environment) is where people can send privacy requests.
 const LEGAL_VERSION = "2026-11-20.3", LEGAL_UPDATED = "20 November 2026";
 const CONTACT_EMAIL = (process.env.CONTACT_EMAIL || "").trim();
@@ -406,7 +408,7 @@ const big = express.json({ limit: "45mb" });
 
 // ---------- auth ----------
 app.get("/api/config", (req, res) => {
-  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: false, hasKey: !!process.env.ANTHROPIC_API_KEY, hasGemini: !!GEMINI_KEY, hasGoogle: !!(GOOGLE_ID && GOOGLE_SECRET), mailReady: MAIL_READY, legalVersion: LEGAL_VERSION, defaultEffort: DEFAULT_EFFORT });
+  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: false, hasKey: !!process.env.ANTHROPIC_API_KEY, hasGemini: !!GEMINI_KEY, hasGoogle: !!(GOOGLE_ID && GOOGLE_SECRET), mailReady: MAIL_READY, legalVersion: LEGAL_VERSION, version: CHANGELOG[0]?.version || "1", changelog: CHANGELOG.slice(0, 6), defaultEffort: DEFAULT_EFFORT });
 });
 
 const USER_RE = /^[A-Za-z0-9_.-]{3,24}$/;

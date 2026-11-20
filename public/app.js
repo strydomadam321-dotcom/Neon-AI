@@ -439,10 +439,37 @@ function closePlans() { if (gatePlans) return; $("plans").classList.add("hidden"
 async function gateChoose(id) {
   try {
     const d = await api("/api/plan/choose", { method: "POST", body: { plan: id } });
-    plan = d.plan; gatePlans = false; $("plans").classList.add("hidden"); renderPlanSettings();
+    plan = d.plan; gatePlans = false; $("plans").classList.add("hidden"); renderPlanSettings(); maybeWhatsNew();
     toast(id === "free" ? "You're on Free. Welcome aboard." : "Got it. You start on Free, and we'll switch on " + (config.plans.find((p) => p.id === id)?.name || "your plan") + " when payments open.");
   } catch (e) { toast(e.message, "err"); }
 }
+// ---------- update log: pops up once per new version (unless "Don't show again" is ticked) ----------
+const wnKey = (k) => "neon-" + k + "-" + (user?.username || "");
+let wnShowing = false;
+function fillWhatsNew() {
+  const list = (config.changelog || []), cur = list[0]; if (!cur) return false;
+  $("wnTag").textContent = cur.tag || "Update"; $("wnTitle").textContent = cur.title || "What's new";
+  $("wnMeta").textContent = "Version " + cur.version + (cur.date ? " · " + cur.date : "");
+  const box = $("wnList"); box.innerHTML = "";
+  cur.items.forEach((it, i) => { const d = document.createElement("div"); d.className = "wn-item"; d.style.animationDelay = 0.12 + i * 0.07 + "s"; d.innerHTML = `<span class="wn-ic"></span><span class="wn-tx"></span>`; d.querySelector(".wn-ic").textContent = it.icon || "•"; d.querySelector(".wn-tx").innerHTML = DOMPurify.sanitize(it.text || "", { ALLOWED_TAGS: ["b", "i", "em", "strong", "code"] }); box.appendChild(d); });
+  return true;
+}
+function openWhatsNew(manual) {
+  if (wnShowing || !fillWhatsNew()) return;
+  wnShowing = true; $("wnNever").checked = !!ls.get(wnKey("nolog"));
+  $("wnOk").querySelector(".lbl").textContent = manual ? "Close" : "Got it";
+  const o = $("whatsnew"); o.classList.remove("hidden", "out");
+}
+function closeWhatsNew() {
+  if (!wnShowing) return; wnShowing = false;
+  try { ls.set(wnKey("seen"), config.version); if ($("wnNever").checked) ls.set(wnKey("nolog"), "1"); else localStorage.removeItem(wnKey("nolog")); } catch {}
+  const o = $("whatsnew"); o.classList.add("out"); setTimeout(() => { if (!wnShowing) o.classList.add("hidden"); o.classList.remove("out"); }, 260);
+}
+function maybeWhatsNew() { if (!user || !config.version || ls.get(wnKey("nolog")) || ls.get(wnKey("seen")) === config.version) return; setTimeout(() => openWhatsNew(false), 700); }
+$("wnOk").onclick = closeWhatsNew; $("wnX").onclick = closeWhatsNew;
+$("whatsnew").onmousedown = (e) => { if (e.target === $("whatsnew")) closeWhatsNew(); };
+$("wnOpen").onclick = () => { closeSettings(true); setTimeout(() => openWhatsNew(true), 200); };
+addEventListener("keydown", (e) => { if (e.key === "Escape" && wnShowing) { e.stopImmediatePropagation(); closeWhatsNew(); } }, true);
 $("closePlans").onclick = closePlans;
 $("plans").onmousedown = (e) => { if (e.target === $("plans")) closePlans(); };
 $("seePlans").onclick = () => openPlans(false);
@@ -1615,6 +1642,7 @@ async function enterApp(data) {
   clearInterval(syncTimer);
   syncTimer = setInterval(syncNow, 25000);
   if (!plan.chosen && !user.dev) openPlans(true);               // first time in: the plan pop-up comes before anything else
+  else maybeWhatsNew();
 }
 
 (async function init() {

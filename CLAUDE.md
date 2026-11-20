@@ -49,3 +49,7 @@
 - Beside the name in the sidebar: a ring showing the most-used limited allowance (Free: Gemini tokens/day, Plus: Claude messages/day; Spark/Max have none, so a muted infinity). Click for a pop-up (Gemini + Claude rows, reset time); "See all" opens Settings, which shows the same rows (`renderUsage` in `public/app.js`).
 - Dev accounts get a coloured infinity instead of the ring: each 20k Gemini tokens used today moves light green, dark green, light yellow, dark yellow, light red, dark red, then rainbow.
 - Dropdowns inside cards reuse the `.dd` styles (see `niceSelect` in `public/larp.js`); do not use a bare native `<select>` in the UI.
+
+## Update log (`changelog.json`)
+- Every redeploy adds a NEW entry at the TOP of `changelog.json` (`version`, `date`, `title`, `tag`, `items[{icon,text}]`; `<b>`/`<i>` allowed in text). The server sends it in `/api/config`; the client shows the newest one once per version when the main page loads (seen version in localStorage `neon-seen-<username>`; the "Don't show again" tick stores `neon-nolog-<username>` and stops all future pop-ups; Settings > "What's new" reopens it).
+- Pick the version by size of the change: big, headline features = next major (V3); a new feature or noticeable improvement = minor (2.1); small fixes/tweaks = patch (2.0.1). Keep items short and in plain language for users.
