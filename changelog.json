@@ -7,7 +7,7 @@
     "items": [
       {
         "icon": "⌨️",
-        "text": "<b>/chess</b> for playing chess against a bot you choose.<br><b>/larp</b> for practising trading with fake money, with a beginner tutorial you can skip."
+        "text": "<b class=\"cmd c-chess\">/chess</b> for playing chess against a bot you choose.<br><b class=\"cmd c-larp\">/larp</b> for practising trading with fake money, with a beginner tutorial you can skip."
       },
       {
         "icon": "📊",

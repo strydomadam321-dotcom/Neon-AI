@@ -451,7 +451,7 @@ function fillWhatsNew() {
   $("wnTag").textContent = cur.tag || "Update"; $("wnTitle").textContent = cur.title || "What's new";
   $("wnMeta").textContent = "Version " + cur.version + (cur.date ? " · " + cur.date : "");
   const box = $("wnList"); box.innerHTML = "";
-  cur.items.forEach((it, i) => { const d = document.createElement("div"); d.className = "wn-item"; d.style.animationDelay = 0.12 + i * 0.07 + "s"; d.innerHTML = `<span class="wn-ic"></span><span class="wn-tx"></span>`; d.querySelector(".wn-ic").textContent = it.icon || "•"; d.querySelector(".wn-tx").innerHTML = DOMPurify.sanitize(it.text || "", { ALLOWED_TAGS: ["b", "i", "em", "strong", "code", "br"] }); box.appendChild(d); });
+  cur.items.forEach((it, i) => { const d = document.createElement("div"); d.className = "wn-item"; d.style.animationDelay = 0.12 + i * 0.07 + "s"; d.innerHTML = `<span class="wn-ic"></span><span class="wn-tx"></span>`; d.querySelector(".wn-ic").textContent = it.icon || "•"; d.querySelector(".wn-tx").innerHTML = DOMPurify.sanitize(it.text || "", { ALLOWED_TAGS: ["b", "i", "em", "strong", "code", "br"], ALLOWED_ATTR: ["class"] }); box.appendChild(d); });
   return true;
 }
 function openWhatsNew(manual) {

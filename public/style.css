@@ -1159,3 +1159,10 @@ body.in-app .rs-dim { opacity: 1; }
 .wn-foot .btn { padding: 7px 20px; min-height: 0; height: 36px; font-size: 14px; border-radius: 11px; }
 .wn-item { line-height: 1.7; }
 .wn-foot .btn.primary, .wn-foot .btn.primary .lbl { color: #12041a; font-weight: 700; opacity: 1; }
+
+.wn-foot .btn { display: inline-flex; align-items: center; justify-content: center; height: 30px; min-height: 0; padding: 0 18px; font-size: 13.5px; line-height: 1; border-radius: 10px; }
+.wn-foot .btn .lbl { display: block; line-height: 1; padding: 0; margin: 0; transform: none; }
+.wn-tx b.cmd { display: inline-block; padding: 0 8px; margin-right: 2px; border-radius: 8px; font-family: var(--mono, ui-monospace, monospace); font-weight: 700; letter-spacing: .02em; color: var(--c); background: rgba(var(--r), .13); border: 1px solid rgba(var(--r), .5); text-shadow: 0 0 12px var(--c); box-shadow: 0 0 14px rgba(var(--r), .3), inset 0 0 10px rgba(var(--r), .1); animation: cmdGlow 2.4s ease-in-out infinite; }
+.wn-tx b.c-chess { --c: #3dffa8; --r: 61, 255, 168; }
+.wn-tx b.c-larp { --c: #ffd166; --r: 255, 209, 102; animation-delay: -1.2s; }
+@keyframes cmdGlow { 50% { box-shadow: 0 0 24px rgba(var(--r), .55), inset 0 0 12px rgba(var(--r), .2); text-shadow: 0 0 18px var(--c); } }
