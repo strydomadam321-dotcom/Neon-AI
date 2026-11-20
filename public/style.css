@@ -1109,3 +1109,37 @@ body.in-app .rs-dim { opacity: 1; }
 .artifact.larp.is-fs, .artifact.larp:fullscreen { overflow: auto; background: var(--bg); border-radius: 0; }
 .artifact.larp:fullscreen .lp-chartwrap, .artifact.larp.is-fs .lp-chartwrap { height: clamp(300px, 56vh, 700px); }
 @media (max-width: 860px) { .lp-body { grid-template-columns: 1fr; padding: 10px; } .lp-feat, .lp-stats { grid-template-columns: 1fr 1fr; } .lp-chartwrap { height: clamp(240px, 62vw, 380px); } .lp-card { padding: 16px; } }
+
+/* ---------- daily usage (ring beside your name, pop-up, settings) ---------- */
+.side-bottom { position: relative; }
+.usage-ring { flex: none; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; transition: transform .25s cubic-bezier(.3, 1.4, .5, 1), background .2s; }
+.usage-ring[hidden] { display: none; }
+.usage-ring:hover { transform: scale(1.12); background: rgba(255, 255, 255, .06); }
+.usage-ring svg { width: 26px; height: 26px; transform: rotate(-90deg); overflow: visible; }
+.usage-ring circle { fill: none; stroke-width: 3.4; }
+.usage-ring .tr { stroke: rgba(255, 255, 255, .13); }
+.usage-ring .pg { stroke: var(--rc, var(--cyan)); stroke-linecap: round; filter: drop-shadow(0 0 4px var(--rc, var(--cyan))); transition: stroke-dashoffset .9s cubic-bezier(.3, 1.25, .4, 1), stroke .4s; }
+.inf { font-size: 22px; font-weight: 700; line-height: 1; color: var(--ic, var(--dim)); text-shadow: 0 0 10px var(--ic, transparent); transition: color .5s, text-shadow .5s; }
+.inf.dim { opacity: .6; text-shadow: none; }
+.inf.rainbow { background: linear-gradient(90deg, #ff4d6d, #ffb347, #ffe27a, #3dffa8, #3df0ff, #8b5cf6, #ff4d6d); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none; filter: drop-shadow(0 0 5px rgba(255, 255, 255, .35)); animation: infRb 3s linear infinite; }
+@keyframes infRb { to { background-position: -200% 0; } }
+.usage-pop { position: absolute; z-index: 30; left: 0; right: 0; bottom: calc(100% + 8px); padding: 14px 14px 12px; border-radius: 16px; background: rgba(var(--pop), .985); backdrop-filter: blur(22px) saturate(150%); -webkit-backdrop-filter: blur(22px) saturate(150%); border: 1px solid var(--line2); box-shadow: 0 24px 70px rgba(0, 0, 0, .7), 0 0 44px rgba(var(--a1), .12);
+  opacity: 0; transform: translateY(10px) scale(.96); filter: blur(4px); transform-origin: bottom left; pointer-events: none; visibility: hidden; transition: opacity .2s, filter .25s, transform .3s cubic-bezier(.3, 1.25, .4, 1), visibility 0s .3s; }
+.usage-pop.open { opacity: 1; transform: none; filter: none; pointer-events: auto; visibility: visible; transition-delay: 0s; }
+.usage-pop .up-row { animation: lpUp .45s cubic-bezier(.2, .9, .25, 1) both; } .usage-pop .up-row:nth-of-type(2) { animation-delay: .06s; }
+.up-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; }
+.up-all { background: none; border: 0; color: var(--dim); cursor: pointer; font: inherit; font-size: 12.5px; padding: 2px 0; } .up-all:hover { color: var(--cyan); }
+.up-row { margin-bottom: 13px; } .up-row.off { opacity: .55; }
+.up-l { display: flex; align-items: baseline; gap: 8px; font-size: 13px; margin-bottom: 6px; } .up-l b { font-weight: 600; } .up-l span { margin-left: auto; color: var(--dim); font-size: 12px; } .up-l strong { font-size: 12.5px; min-width: 34px; text-align: right; } .up-l strong.hot { color: var(--bad); }
+.up-row small { display: block; margin-top: 5px; font-size: 11.5px; color: var(--dim); }
+.up-dev { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 11px; background: rgba(255, 255, 255, .04); border: 1px solid var(--line); font-size: 12.5px; color: var(--dim); }
+
+/* ---------- nicer dropdowns inside the trading card ---------- */
+.lp-dd { position: relative; } .lp-dd.open { z-index: 25; }
+.lp-dd .dd-btn { height: 32px; padding: 0 8px 0 11px; font-size: 12.5px; border-radius: 9px; gap: 6px; font-weight: 600; width: 100%; justify-content: space-between; }
+.lp-dd .dd-btn .lbl { transition: opacity .12s; }
+.lp-dd .dd-btn .chev { width: 14px; height: 14px; }
+.lp-dd .dd-menu { right: auto; left: 0; top: calc(100% + 6px); width: max(100%, 132px); transform-origin: top left; padding: 5px; border-radius: 13px; }
+.lp-dd .dd-item { padding: 8px 10px; gap: 9px; font-size: 13px; color: #fff; }
+.lp-dd .dd-item .tick { width: 15px; height: 15px; margin-left: auto; }
+.lp-dd[data-v="buy"] .dd-btn { color: var(--ok); } .lp-dd[data-v="sell"] .dd-btn { color: var(--bad); }

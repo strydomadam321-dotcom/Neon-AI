@@ -450,22 +450,55 @@ function renderPlanSettings() {
   const p = config.plans.find((x) => x.id === plan.id) || { name: "Free" };
   $("planName").textContent = user?.dev ? "Developer" : p.name + (plan.owner ? " (owner)" : "");
   const req = plan.requested ? ` Requested: ${config.plans.find((x) => x.id === plan.requested)?.name}, switches on when payments open.` : "";
-  const box = $("usageBox");
-  if (plan.id === "free") {
-    const pct = Math.min(100, Math.round((plan.usedTokens / config.freeTokens) * 100));
-    $("planSub").textContent = "Gemini only, with a daily token limit." + req;
-    box.hidden = false; $("usageFill").style.width = pct + "%"; $("usageFill").classList.toggle("hot", pct >= 85);
-    $("usageTxt").textContent = `${plan.usedTokens.toLocaleString()} of ${config.freeTokens.toLocaleString()} Gemini tokens used today. Resets at midnight UTC.`;
-  } else if (plan.id === "plus") {
-    $("planSub").textContent = "Unlimited Gemini, plus Claude Sonnet and Haiku." + req;
-    box.hidden = false; const pct = Math.min(100, Math.round((plan.usedClaude / config.plusClaudeMsgs) * 100));
-    $("usageFill").style.width = pct + "%"; $("usageFill").classList.toggle("hot", pct >= 85);
-    $("usageTxt").textContent = `${plan.usedClaude} of ${config.plusClaudeMsgs} Claude messages used today.`;
-  } else {
-    $("planSub").textContent = (user?.dev ? "Dev account: full access, no limits." : plan.id === "max" ? "Everything, unlimited." : "Unlimited Gemini.") + req;
-    box.hidden = true;
-  }
+  $("planSub").textContent = (plan.id === "free" ? "Gemini only, with a daily token limit." : plan.id === "plus" ? "Unlimited Gemini, plus Claude Sonnet and Haiku." : user?.dev ? "Dev account: full access, no limits." : plan.id === "max" ? "Everything, unlimited." : "Unlimited Gemini.") + req;
+  renderUsage();
 }
+// ---------- daily usage: the ring beside your name, its pop-up, and the Settings section ----------
+const DEV_TIERS = [["Light green", "#6dffae"], ["Dark green", "#1fb865"], ["Light yellow", "#ffe27a"], ["Dark yellow", "#e0a800"], ["Light red", "#ff8f9d"], ["Dark red", "#d1203a"]];   // each step is 20,000 tokens, then rainbow
+const devTier = () => { const i = Math.floor(plan.usedTokens / 20000); return i >= DEV_TIERS.length ? null : { i, name: DEV_TIERS[i][0], color: DEV_TIERS[i][1] }; };
+function usageInfo() {
+  const rows = [
+    { name: "Gemini", used: plan.usedTokens, limit: plan.id === "free" ? config.freeTokens : null, unit: "tokens", on: true },
+    { name: "Claude", used: plan.usedClaude, limit: plan.id === "plus" ? config.plusClaudeMsgs : null, unit: "messages", on: plan.id === "plus" || plan.id === "max" },
+  ];
+  rows.forEach((r) => (r.pct = r.limit ? Math.min(100, Math.round((r.used / r.limit) * 100)) : null));
+  const top = rows.filter((r) => r.on && r.limit).sort((a, b) => b.pct - a.pct)[0] || null;   // the one you've used the most of
+  return { rows, top };
+}
+const resetText = () => { const n = new Date(), t = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1)); return "Resets " + t.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }); };
+function usageRowsHTML() {
+  const { rows } = usageInfo();
+  let h = rows.map((r) => {
+    const hot = r.pct >= 85 ? "hot" : "";
+    const right = !r.on ? "Not on your plan" : r.limit ? resetText() : "Unlimited";
+    const foot = r.on ? `${r.used.toLocaleString()}${r.limit ? " of " + r.limit.toLocaleString() : ""} ${r.unit} today` : "Claude comes with Plus and Max";
+    return `<div class="up-row${r.on ? "" : " off"}"><div class="up-l"><b>${r.name}</b><span>${right}</span>${r.limit ? `<strong class="${hot}">${r.pct}%</strong>` : ""}</div>${r.limit ? `<div class="usage-bar"><i class="${hot}" style="width:${r.pct}%"></i></div>` : ""}<small>${foot}</small></div>`;
+  }).join("");
+  if (user?.dev) { const t = devTier(); h += `<div class="up-dev"><span class="inf ${t ? "" : "rainbow"}" style="${t ? "--ic:" + t.color : ""}">∞</span><span>${t ? t.name + ": under " + ((t.i + 1) * 20) + "k Gemini tokens today" : "Rainbow: over 120k Gemini tokens today"}</span></div>`; }
+  return h;
+}
+let usageOpen = false;
+function renderUsage() {
+  const btn = $("usageBtn"); if (!user) return;
+  const { top } = usageInfo(), dev = !!user.dev;
+  btn.hidden = false;
+  if (dev) { const t = devTier(); btn.innerHTML = `<span class="inf ${t ? "" : "rainbow"}" style="${t ? "--ic:" + t.color : ""}">∞</span>`; btn.title = "Developer · " + plan.usedTokens.toLocaleString() + " Gemini tokens today"; }
+  else if (top) {
+    const C = 2 * Math.PI * 10, col = top.pct >= 85 ? "#ff5c7a" : top.pct >= 60 ? "#ffb347" : "var(--cyan)";
+    btn.innerHTML = `<svg viewBox="0 0 26 26"><circle class="tr" cx="13" cy="13" r="10"/><circle class="pg" cx="13" cy="13" r="10" style="--rc:${col};stroke-dasharray:${C.toFixed(1)};stroke-dashoffset:${(C * (1 - top.pct / 100)).toFixed(1)}"/></svg>`;
+    btn.title = `${top.pct}% of today's ${top.name} limit used`;
+  } else { btn.innerHTML = `<span class="inf dim">∞</span>`; btn.title = "Unlimited"; }
+  const pop = $("usagePop");
+  pop.innerHTML = `<div class="up-h"><b>${dev ? "Developer" : "Daily usage · " + (config.plans.find((x) => x.id === plan.id)?.name || "Free")}</b><button type="button" class="up-all">See all →</button></div>${usageRowsHTML()}`;
+  pop.querySelector(".up-all").onclick = () => { toggleUsage(false); openSettings(); setTimeout(() => $("usageBox").scrollIntoView({ behavior: "smooth", block: "center" }), 60); };
+  $("usageBox").innerHTML = usageRowsHTML();
+}
+function toggleUsage(on) {
+  usageOpen = on == null ? !usageOpen : on; $("usagePop").classList.toggle("open", usageOpen);
+  if (usageOpen) api("/api/me", { noAuthRedirect: true }).then((d) => { if (usageOpen && d && d.plan) { plan = { ...plan, usedTokens: d.plan.usedTokens, usedClaude: d.plan.usedClaude }; renderUsage(); } }).catch(() => {});
+}
+$("usageBtn").onclick = (e) => { e.stopPropagation(); toggleUsage(); };
+document.addEventListener("mousedown", (e) => { if (usageOpen && !e.target.closest("#usagePop, #usageBtn")) toggleUsage(false); });
 const modelLocked = (id) => {
   const m = config.models.find((x) => x.id === id);
   if (!m || m.provider !== "claude") return false;
@@ -949,6 +982,7 @@ async function streamReply() {
   setBusy(false); abortCtl = null;
   if (!user) return;
   if (text || errMsg) chat.messages.push({ role: "assistant", text, ...(errMsg ? { err: errMsg, errModel: usedModel } : {}) });
+  if (text && !errMsg && config.models.find((m) => m.id === usedModel)?.provider === "claude") { plan.usedClaude++; renderUsage(); }
   const saved = await persist(chat);
   if (current === chat) renderMessages();
   if (saved && !errMsg && text && chat.messages.length === 2) autoTitle(chat);

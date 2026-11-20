@@ -248,9 +248,11 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
     </label>
     <div id="chatList" class="chat-list"></div>
     <div class="side-bottom">
+      <div id="usagePop" class="usage-pop" role="dialog" aria-label="Daily usage"></div>
       <div class="me">
         <div class="avatar sm" id="meAvatar">?</div>
         <div class="me-name" id="meName"></div>
+        <button id="usageBtn" class="usage-ring" type="button" aria-label="Daily usage" aria-haspopup="true" hidden></button>
         <button id="settingsBtn" class="icon" aria-label="Settings" title="Settings"><svg class="ic"><use href="#i-sliders"/></svg></button>
         <button id="logoutBtn" class="icon" aria-label="Sign out" title="Sign out"><svg class="ic"><use href="#i-logout"/></svg></button>
       </div>
@@ -342,10 +344,7 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
           <div class="txt"><b id="planName">Free</b><span id="planSub"></span></div>
           <button id="seePlans" type="button" class="btn small"><svg class="ic"><use href="#i-bolt"/></svg>See plans</button>
         </div>
-        <div class="usage" id="usageBox" hidden>
-          <div class="usage-bar"><i id="usageFill"></i></div>
-          <span id="usageTxt"></span>
-        </div>
+        <div class="usage" id="usageBox"></div>
       </section>
 
       <section class="sec">

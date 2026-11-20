@@ -44,3 +44,8 @@
 - The tutorial (`TUT` in larp.js) has gated tasks, quizzes and a Skip button; `ev` flags and `moved` drive the task checks. Add lessons there.
 - `POST /api/larp/ai` (server.js, Gemini 3.5 Flash-Lite, counted in the user's Gemini tokens): `scenario` (ticker/company/headline/alert JSON), `coach` (debrief), `ask` (coach chat). The client falls back to local text when it is unavailable or limited.
 - Sounds live in `public/chesssound.js` (fill / cash / loss / alert / level) and share the mute key.
+
+## Daily usage ring
+- Beside the name in the sidebar: a ring showing the most-used limited allowance (Free: Gemini tokens/day, Plus: Claude messages/day; Spark/Max have none, so a muted infinity). Click for a pop-up (Gemini + Claude rows, reset time); "See all" opens Settings, which shows the same rows (`renderUsage` in `public/app.js`).
+- Dev accounts get a coloured infinity instead of the ring: each 20k Gemini tokens used today moves light green, dark green, light yellow, dark yellow, light red, dark red, then rainbow.
+- Dropdowns inside cards reuse the `.dd` styles (see `niceSelect` in `public/larp.js`); do not use a bare native `<select>` in the UI.

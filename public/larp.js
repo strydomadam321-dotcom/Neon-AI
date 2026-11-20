@@ -88,6 +88,41 @@
     if (st.run && !st.run.view) st.run.view = { n: 90, off: 0 };
   }
 
+  // a nicer dropdown that replaces a native <select> (the select stays as the source of truth, hidden)
+  const DD_COLS = { buy: "61,255,168", sell: "255,92,122", limit: "0,229,255", stop: "255,179,71" };
+  function niceSelect(sel, icon) {
+    const root = document.createElement("div"); root.className = "dd lp-dd";
+    root.innerHTML = `<button type="button" class="dd-btn" aria-haspopup="listbox"><span class="lbl"></span>${icon("chev", "chev")}</button><div class="dd-menu" role="listbox"></div>`;
+    sel.hidden = true; sel.after(root);
+    const btn = root.querySelector(".dd-btn"), menu = root.querySelector(".dd-menu"), lbl = root.querySelector(".lbl");
+    const opts = [...sel.options];
+    let idx = Math.max(0, sel.selectedIndex);
+    const items = () => menu.querySelectorAll(".dd-item");
+    const focusItem = () => items().forEach((b, i) => b.classList.toggle("focus", i === idx));
+    const set = (on) => { root.classList.toggle("open", on); btn.setAttribute("aria-expanded", on); if (on) { idx = sel.selectedIndex; focusItem(); } };
+    const paint = (animate) => {
+      const put = () => { lbl.textContent = opts[sel.selectedIndex].text; lbl.style.opacity = 1; };
+      if (animate) { lbl.style.opacity = 0; setTimeout(put, 110); } else put();
+      root.dataset.v = sel.value; items().forEach((b, i) => b.classList.toggle("sel", i === sel.selectedIndex));
+    };
+    opts.forEach((o, i) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "dd-item"; b.setAttribute("role", "option"); b.style.setProperty("--rgb", DD_COLS[o.value] || "0,229,255"); b.style.animationDelay = i * 0.04 + "s";
+      b.innerHTML = `<span class="nm"></span>${icon("check", "tick")}`; b.querySelector(".nm").textContent = o.text;
+      b.onclick = () => { sel.value = o.value; sel.dispatchEvent(new Event("change")); set(false); paint(true); btn.focus(); };
+      menu.appendChild(b);
+    });
+    btn.onclick = () => set(!root.classList.contains("open"));
+    root.addEventListener("keydown", (e) => {
+      const open = root.classList.contains("open");
+      if (e.key === "Escape" && open) { e.stopPropagation(); set(false); }
+      else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && open) { e.preventDefault(); idx = (idx + (e.key === "ArrowDown" ? 1 : opts.length - 1)) % opts.length; focusItem(); }
+      else if (e.key === "Enter" && open) { e.preventDefault(); items()[idx].click(); }
+    });
+    document.addEventListener("mousedown", (e) => { if (root.isConnected && !root.contains(e.target)) set(false); });
+    paint(false);
+    return root;
+  }
+
   function card(m, ctx) {
     const { icon, api, toast, save } = ctx, st = m.larp;
     rehydrate(st);
@@ -656,6 +691,7 @@
     const wrap = $(".art-wrap");
     $('[data-a="x"]').onclick = (e) => { const open = !wrap.classList.contains("open"); wrap.classList.toggle("open", open); el.classList.toggle("closed", !open); if (!open) setPlaying(false); e.currentTarget.innerHTML = icon(open ? "x" : "chev"); e.currentTarget.title = open ? "Close" : "Open"; setTimeout(draw, 700); };
     window.addEventListener("resize", draw);
+    $$(".lp-ord-f select").forEach((x) => niceSelect(x, icon));
 
     // ---------- first paint (and resuming a saved session) ----------
     st.chat.forEach((c) => addChat(c.f, c.t));
