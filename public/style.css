@@ -1014,3 +1014,6 @@ body.in-app .rs-dim { opacity: 1; }
 .artifact.chess:fullscreen .chess-body, .artifact.chess.is-fs .chess-body { height: 100%; overflow: auto; }
 .artifact.chess:fullscreen .ch-boardwrap, .artifact.chess.is-fs .ch-boardwrap { max-width: min(78vh, 100%); }
 @media (max-width: 760px) { .chess-body { grid-template-columns: 1fr; padding: 12px; } .ch-controls .art-btn span { display: inline; } .ch-log { height: 160px; } }
+.ch-av { overflow: hidden; }
+.ch-av.has-pic { background: none; padding: 0; }
+.ch-av img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
