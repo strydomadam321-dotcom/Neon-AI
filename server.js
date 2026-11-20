@@ -182,6 +182,11 @@ catch (e) { console.warn("users_email_norm_uq not created (duplicate emails exis
   const r = await q("insert into meta(key) values('reset-2026-11-20-all-accounts') on conflict do nothing returning key");
   if (r.rowCount) { await q("truncate users restart identity cascade"); await q("truncate signup_pending, google_pending"); console.log("One-time reset done: all accounts removed."); }
 }
+// one-time reset requested by the owner (second time): every account with its chats and sessions. Runs once.
+{
+  const r = await q("insert into meta(key) values('reset-all-accounts-2') on conflict do nothing returning key");
+  if (r.rowCount) { await q("truncate users restart identity cascade"); await q("truncate signup_pending, google_pending"); console.log("One-time reset #2 done: all accounts removed."); }
+}
 // one-time housekeeping: remove a test account (its chats, sessions and usage go with it). Runs once, then never again.
 {
   const r = await q("insert into meta(key) values('rm-user-asdfefeweffas') on conflict do nothing returning key");
