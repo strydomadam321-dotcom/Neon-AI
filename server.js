@@ -177,6 +177,11 @@ catch (e) { console.warn("users_email_norm_uq not created (duplicate emails exis
   const r = await q("insert into meta(key) values('rm-user-strydomadam321') on conflict do nothing returning key");
   if (r.rowCount) { const d = await q("delete from users where username_lc = 'strydomadam321' or email_norm = 'strydomadam321@gmail.com'"); console.log(`Housekeeping: removed account strydomadam321 (${d.rowCount} found)`); }
 }
+// one-time reset requested by the owner: every account (email or Google) with its chats and sessions. Runs once.
+{
+  const r = await q("insert into meta(key) values('reset-2026-11-20-all-accounts') on conflict do nothing returning key");
+  if (r.rowCount) { await q("truncate users restart identity cascade"); await q("truncate signup_pending, google_pending"); console.log("One-time reset done: all accounts removed."); }
+}
 // one-time housekeeping: remove a test account (its chats, sessions and usage go with it). Runs once, then never again.
 {
   const r = await q("insert into meta(key) values('rm-user-asdfefeweffas') on conflict do nothing returning key");
@@ -284,6 +289,17 @@ async function sendCodeEmail(to, code, kind = "signup") {
   if (!r.ok) { const t = await r.text().catch(() => ""); throw new Error(`Resend ${r.status}: ${t.slice(0, 200)}`); }
 }
 
+async function sendGoogleNotice(to) {
+  if (!RESEND_KEY) { console.log(`[mail debug] google notice for ${to}`); return; }
+  const html = `<div style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:420px;margin:0 auto;padding:28px;color:#111">
+    <h2 style="margin:0 0 6px;font-size:20px">You sign in with Google</h2>
+    <p style="margin:0 0 12px;color:#555">Someone asked to reset the password for this NEON AI account, but it doesn't have one: it uses Google sign-in.</p>
+    <p style="margin:0;color:#555">Open NEON AI and choose <b>Continue with Google</b> with this email address. If that wasn't you, you can ignore this message.</p></div>`;
+  const r = await fetch(RESEND_URL, { method: "POST", signal: AbortSignal.timeout(15000), headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: MAIL_FROM, to: [to], subject: "Your NEON AI account uses Google sign-in", html, text: "Your NEON AI account uses Google sign-in, so it has no password to reset. Open NEON AI and choose Continue with Google with this email address." }) });
+  if (!r.ok) throw new Error(`Resend ${r.status}`);
+}
+
 function checkSignupFields({ username, password, email }) {
   if (typeof email !== "string" || email.length > 120 || !EMAIL_RE.test(email.trim())) return { error: "Enter a valid email address.", field: "email" };
   if (typeof username !== "string" || !USER_RE.test(username)) return { error: "Username must be 3-24 characters: letters, numbers, . _ -", field: "username" };
@@ -301,7 +317,7 @@ app.post("/api/signup/start", small, wrap(async (req, res) => {
   const { username, password } = req.body, em = req.body.email.trim().toLowerCase();
   if (limited("smail:" + em, 5, 60 * 60e3)) return res.status(429).json({ error: "Too many codes sent to that email. Try again in an hour.", field: "email" });
   const { rows: dup } = await q("select username_lc = $1 as u, email_norm = $2 as e from users where username_lc = $1 or email_norm = $2", [username.toLowerCase(), normEmail(em)]);
-  if (dup.some((r) => r.e)) return res.status(409).json({ error: "That email already has an account. Sign in instead.", field: "email" });
+  if (dup.some((r) => r.e)) return res.status(409).json({ error: "This email already has an account (email or Google). Please sign in instead.", field: "email" });
   if (dup.some((r) => r.u)) return res.status(409).json({ error: "That username is taken.", field: "username" });
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
   const hash = await bcrypt.hash(password, 11);
@@ -351,7 +367,7 @@ app.post("/api/signup/verify", small, wrap(async (req, res) => {
     ({ rows: [user] } = await q("insert into users(username,username_lc,pass_hash,email,email_norm,email_verified) values($1,$2,$3,$4,$5,true) returning id,username,settings,plan,plan_requested,has_password,avatar",
       [p.username, p.username_lc, p.pass_hash, em, normEmail(em)]));
   } catch (e) {
-    if (e.code === "23505") return /email/.test(e.constraint || "") ? res.status(409).json({ error: "That email already has an account. Sign in instead.", field: "email" }) : res.status(409).json({ error: "That username was just taken. Pick another.", field: "username" });
+    if (e.code === "23505") return /email/.test(e.constraint || "") ? res.status(409).json({ error: "This email already has an account (email or Google). Please sign in instead.", field: "email" }) : res.status(409).json({ error: "That username was just taken. Pick another.", field: "username" });
     throw e;
   }
   await q("delete from signup_pending where email = $1", [em]);
@@ -415,7 +431,9 @@ app.get("/api/auth/google/callback", wrap(async (req, res) => {
   const email = String(claims.email).toLowerCase(), enorm = normEmail(email), sub = String(claims.sub), pic = isHttps(claims.picture) ? claims.picture : null;
   const cols = "id,username,settings,plan,plan_requested,has_password,avatar";
   let user = (await q(`select ${cols} from users where google_sub = $1`, [sub])).rows[0], created = false;
-  if (!user) user = (await q(`update users set google_sub = $1, email_verified = true where email_norm = $2 and google_sub is null returning ${cols}`, [sub, enorm])).rows[0]; // same mailbox: link to that account
+  const byMail = user ? null : (await q(`select id from users where email_norm = $1`, [enorm])).rows[0];
+  if (pend.username && (user || byMail)) return authFail(res, "This email or Google account already has an account. Please sign in instead.");   // they pressed Create account, but it already exists
+  if (!user && byMail) user = (await q(`update users set google_sub = $1, email_verified = true where id = $2 and google_sub is null returning ${cols}`, [sub, byMail.id])).rows[0]; // signing IN with the same mailbox: link to that account
   if (user) { if (pic && pic !== user.avatar) await q("update users set avatar = $1 where id = $2", [pic, user.id]); }
   else {
     // new account: the username they typed in the sign-up form (if it's still free), otherwise one made from their email
@@ -431,7 +449,7 @@ app.get("/api/auth/google/callback", wrap(async (req, res) => {
       } catch (e) {
         if (e.code !== "23505") throw e;
         if (/google/.test(e.constraint || "")) { user = (await q(`select ${cols} from users where google_sub = $1`, [sub])).rows[0]; break; }   // double-click race: they already exist
-        if (/email/.test(e.constraint || "")) return authFail(res, "That email already has an account. Sign in with your username and password.");
+        if (/email/.test(e.constraint || "")) return authFail(res, "This email or Google account already has an account. Please sign in instead.");
       }
     }
     if (!user) return authFail(res, "Couldn't create your account. Please try again.");
@@ -468,8 +486,16 @@ app.post("/api/password/forgot", small, wrap(async (req, res) => {
   if (!MAIL_READY) return res.status(503).json({ error: "Password reset isn't available yet.", field: "email" });
   const norm = normEmail(email);
   if (!limited("pwfm:" + norm, 5, 60 * 60e3)) {
-    const u = (await q("select id, email from users where email_norm = $1 and has_password", [norm])).rows[0];
-    if (u) {
+    const u = (await q("select id, email, has_password from users where email_norm = $1", [norm])).rows[0];
+    console.log(`password reset asked for ${maskEmail(norm)}: ${!u ? "no account" : u.has_password ? "account with a password" : "Google-only account"}`);
+    if (u && !u.has_password) {
+      // no password to reset: the mailbox owner gets a note saying to use Google (nothing is revealed to whoever typed the address)
+      const cur = (await q("select sent_at from password_resets where user_id = $1", [u.id])).rows[0];
+      if (!cur || Date.now() - new Date(cur.sent_at).getTime() >= RESEND_COOLDOWN_MS) {
+        await q(`insert into password_resets(user_id,code_hash,attempts,expires_at,sent_at) values($1,'-',99,now(),now()) on conflict(user_id) do update set sent_at=now()`, [u.id]);
+        sendGoogleNotice(u.email).catch((e) => console.error("google notice failed:", e.message));
+      }
+    } else if (u) {
       const cur = (await q("select sent_at from password_resets where user_id = $1", [u.id])).rows[0];
       if (!cur || Date.now() - new Date(cur.sent_at).getTime() >= RESEND_COOLDOWN_MS) {
         const code = newCode();
