@@ -19,3 +19,8 @@
 - While nuked, visitors see a "NEON AI has been NUKED" page with a Fairs button (shows `assets/fairs.gif` for one second) and a
   bypass-code box. The bypass code lives ONLY in the Render environment variable `NUKE_BYPASS_CODE` (never put it in the repo).
   A correct code sets a 12-hour cookie that lets that browser use the site normally.
+
+## Files the AI can make (PDF, Word, PowerPoint, Excel / Sheets)
+- The AI writes ```neon-pdf / neon-docx / neon-pptx / neon-xlsx blocks (instructions: `FILE_RULES` in `server.js`, appended to every system prompt).
+- `public/files.js` turns the text into the preview and builds the real file in the browser (pdfmake, docx, PptxGenJS, SheetJS, loaded from a CDN on first use).
+- Code/HTML previews run in a sandboxed iframe without same-origin; `STORAGE_SHIM` in `public/app.js` gives them in-memory localStorage/cookies.

@@ -451,6 +451,8 @@ function downloadText(name, text, ext) {
 // which code blocks get the full panel
 function artifactKind(lang, code) {
   const t = code.trim();
+  const fk = window.NeonFiles && NeonFiles.langToKind(lang);             // pdf / docx / pptx / xlsx files the AI makes
+  if (fk) return t ? fk : null;
   if (["html", "htm", "xhtml"].includes(lang)) return /^<!doctype|^<html|^<head|^<body|<script|<style/i.test(t) || t.length > 400 ? "html" : null;
   if (lang === "svg") return /^<svg/i.test(t) ? "svg" : null;
   if (["md", "markdown"].includes(lang)) return t.length > 200 ? "md" : null;
@@ -458,6 +460,7 @@ function artifactKind(lang, code) {
   return null;
 }
 function artifactTitle(kind, code) {
+  if (window.NeonFiles && NeonFiles.KINDS[kind]) return NeonFiles.parseMeta(code, kind).title;
   if (kind === "html") { const m = code.match(/<title[^>]*>([^<]{1,60})<\/title>/i); return m ? m[1].trim() : "Web page"; }
   if (kind === "svg") return "SVG image";
   if (kind === "md") { const m = code.match(/^\s{0,3}#{1,3}\s+(.{1,60})$/m); return m ? m[1].trim() : "Document"; }
@@ -478,8 +481,15 @@ function parseCsv(text) {
 }
 const DOC_CSS = 'body{font:15px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1b1b2f;background:#fff;margin:0;padding:28px;max-width:860px;margin:0 auto}h1,h2,h3{line-height:1.25}pre{background:#f3f1ff;padding:12px;border-radius:8px;overflow:auto}code{background:#f3f1ff;padding:1px 5px;border-radius:5px}pre code{background:none;padding:0}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d9d4f0;padding:7px 11px;text-align:left}th{background:#f3f1ff}blockquote{border-left:3px solid #a66bff;margin:0;padding-left:14px;color:#555}img{max-width:100%}';
 const PRINT_HOOK = '<script>addEventListener("message",function(e){if(e.data==="neon-print")print()})<\/script>';   // lets the Save-as-PDF button ask this page to print itself
+// A sandboxed page isn't allowed to touch localStorage / cookies (it would crash on the first read), so give it harmless in-memory ones
+const STORAGE_SHIM = '<script>(function(){function mem(){var d={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[k]=String(v)},removeItem:function(k){delete d[k]},clear:function(){d={}},key:function(i){return Object.keys(d)[i]||null},get length(){return Object.keys(d).length}}}["localStorage","sessionStorage"].forEach(function(n){try{window[n].getItem("x")}catch(e){try{Object.defineProperty(window,n,{value:mem(),configurable:true})}catch(e2){}}});try{document.cookie}catch(e){var c="";try{Object.defineProperty(document,"cookie",{get:function(){return c},set:function(v){c=String(v).split(";")[0]}})}catch(e3){}}})()<\/script>';
+function injectHead(code, js) {
+  for (const re of [/<head[^>]*>/i, /<html[^>]*>/i, /^\s*<!doctype[^>]*>/i]) { const m = code.match(re); if (m) return code.slice(0, m.index + m[0].length) + js + code.slice(m.index + m[0].length); }
+  return js + code;
+}
 function previewDoc(kind, code) {
-  if (kind === "html") return /<\/body>/i.test(code) ? code.replace(/<\/body>(?![\s\S]*<\/body>)/i, PRINT_HOOK + "</body>") : code + PRINT_HOOK;
+  if (window.NeonFiles && NeonFiles.KINDS[kind]) return NeonFiles.previewDoc(kind, code, (h) => DOMPurify.sanitize(h));
+  if (kind === "html") { const c = injectHead(code, STORAGE_SHIM); return /<\/body>/i.test(c) ? c.replace(/<\/body>(?![\s\S]*<\/body>)/i, PRINT_HOOK + "</body>") : c + PRINT_HOOK; }
   if (kind === "svg") return '<!doctype html><meta charset="utf-8"><style>html,body{margin:0;height:100%}body{display:grid;place-items:center;background:#fff}svg{max-width:96%;max-height:96vh;height:auto}</style>' + code + PRINT_HOOK;
   if (kind === "md") return '<!doctype html><meta charset="utf-8"><style>' + DOC_CSS + "</style>" + DOMPurify.sanitize(marked.parse(code)) + PRINT_HOOK;
   const rows = parseCsv(code.trim()), esc = (x) => String(x).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])), cells = (r, t) => r.map((c) => `<${t}>${esc(c)}</${t}>`).join("");
@@ -488,26 +498,27 @@ function previewDoc(kind, code) {
 
 function artifactCard(code, lang, kind, live) {
   const title = artifactTitle(kind, code), ext = EXT[lang] || kind;
+  const file = window.NeonFiles && NeonFiles.KINDS[kind];                      // a real file (PDF / Word / PowerPoint / Excel) built from the text
   const card = document.createElement("div");
   card.className = "artifact" + (live ? " live" : "");
   card.dataset.kind = kind;
   card.innerHTML = `
     <div class="art-head">
-      <span class="art-title">${icon("sparkle")}<b></b></span>
+      <span class="art-title">${file ? `<i class="art-badge" style="--c:${file.color}">${file.label}</i>` : icon("sparkle")}<b></b></span>
       <div class="art-tabs" data-t="${live ? "code" : "preview"}"><span class="art-ink"></span><button type="button" data-t="code">Code</button><button type="button" data-t="preview"${live ? " disabled" : ""}>Preview</button></div>
       <div class="art-acts">
         <button type="button" class="art-btn" data-a="copy" title="Copy code">${icon("copy")}<span>Copy</span></button>
         <button type="button" class="art-btn" data-a="dl" title="Download as .${ext}">${icon("download")}<span>Download</span></button>
-        <button type="button" class="art-btn ico" data-a="pdf" title="Save as PDF"${live ? " disabled" : ""}>${icon("printer")}</button>
+        ${file ? "" : `<button type="button" class="art-btn ico" data-a="pdf" title="Save as PDF"${live ? " disabled" : ""}>${icon("printer")}</button>`}
         <button type="button" class="art-btn ico" data-a="fs" title="Fullscreen">${icon("expand")}</button>
         <button type="button" class="art-btn ico" data-a="x" title="Close">${icon("x")}</button>
       </div>
     </div>
     <div class="collapse open art-wrap"><div class="collapse-in"><div class="art-body">
-      <div class="art-pane art-codepane${live ? " on" : ""}"><pre><code class="language-${lang}"></code></pre></div>
+      <div class="art-pane art-codepane${live ? " on" : ""}"><pre><code class="language-${file ? (kind === "xlsx" ? "plaintext" : "markdown") : lang}"></code></pre></div>
       <div class="art-pane art-prevpane${live ? "" : " on"}"></div>
     </div></div></div>`;
-  card.querySelector(".art-title b").textContent = live ? "Writing code…" : title;
+  card.querySelector(".art-title b").textContent = live ? (file ? `Creating your ${file.label} file…` : "Writing code…") : title;
   const codeEl = card.querySelector("code"); codeEl.textContent = code;
   if (window.hljs) { try { hljs.highlightElement(codeEl); } catch {} }
   const tabs = card.querySelector(".art-tabs"), prev = card.querySelector(".art-prevpane"), codePane = card.querySelector(".art-codepane");
@@ -532,12 +543,43 @@ function artifactCard(code, lang, kind, live) {
   tabs.querySelectorAll("button").forEach((b) => (b.onclick = () => show(b.dataset.t)));
   show("preview");
 
+  // build the real file in the browser (the libraries load the first time), then save it
+  const makeFile = async (btn, k, format) => {
+    if (btn.dataset.busy) return; btn.dataset.busy = "1";
+    const old = btn.innerHTML; btn.innerHTML = `<i class="art-spin"></i><span>Making ${file.label} file…</span>`; btn.disabled = true;
+    try {
+      const out = await NeonFiles.build(k, code, format);
+      const a = document.createElement("a"); a.href = URL.createObjectURL(out.blob); a.download = out.filename; document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+      btn.innerHTML = `${icon("check")}<span>Saved ${out.filename.split(".").pop().toUpperCase()}</span>`;
+      setTimeout(() => { btn.innerHTML = old; btn.disabled = false; delete btn.dataset.busy; }, 1600);
+    } catch (e) {
+      console.error(e); toast("Couldn't make that file: " + (e.message || "unknown error"), "err");
+      btn.innerHTML = old; btn.disabled = false; delete btn.dataset.busy;
+    }
+  };
+  let menu = null;
+  const closeMenu = () => { if (!menu) return; const m = menu; menu = null; m.classList.add("out"); setTimeout(() => m.remove(), 220); document.removeEventListener("pointerdown", outside, true); };
+  const outside = (e) => { if (menu && !menu.contains(e.target) && !e.target.closest('[data-a="dl"]')) closeMenu(); };
+  const toggleMenu = (btn) => {
+    if (menu) { closeMenu(); return; }
+    menu = document.createElement("div"); menu.className = "art-menu";
+    menu.innerHTML = '<button type="button" data-f="xlsx"><b>Excel / Google Sheets</b><span>.xlsx</span></button><button type="button" data-f="ods"><b>OpenDocument</b><span>.ods</span></button><button type="button" data-f="csv"><b>CSV (first sheet)</b><span>.csv</span></button>';
+    menu.querySelectorAll("button").forEach((b) => (b.onclick = () => { const f = b.dataset.f; closeMenu(); makeFile(btn, kind, f); }));
+    card.querySelector(".art-head").appendChild(menu);
+    document.addEventListener("pointerdown", outside, true);
+  };
+
   const wrap = card.querySelector(".art-wrap"), setFsIcon = (on) => { card.querySelector('[data-a="fs"]').innerHTML = icon(on ? "shrink" : "expand"); card.querySelector('[data-a="fs"]').title = on ? "Exit fullscreen" : "Fullscreen"; };
   const flash = (btn, txt) => { const old = btn.innerHTML; btn.innerHTML = `${icon("check")}<span>${txt}</span>`; setTimeout(() => (btn.innerHTML = old), 1400); };
   card.addEventListener("fullscreenchange", () => { const on = document.fullscreenElement === card; card.classList.toggle("is-fs", on); setFsIcon(on); });
   card.querySelectorAll(".art-btn").forEach((btn) => (btn.onclick = () => {
     const a = btn.dataset.a;
     if (a === "copy") { navigator.clipboard.writeText(code); flash(btn, "Copied"); }
+    else if (a === "dl" && file) {
+      if (kind === "xlsx") { toggleMenu(btn); return; }                       // Excel / Google Sheets / CSV choices
+      makeFile(btn, kind);
+    }
     else if (a === "dl") { downloadText(slug(title) + "." + ext, code, ext); flash(btn, "Saved"); }
     else if (a === "pdf") { show("preview"); toast("In the print window, choose Save as PDF."); setTimeout(() => frame?.contentWindow?.postMessage("neon-print", "*"), 250); }
     else if (a === "fs") {

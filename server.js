@@ -73,6 +73,14 @@ const GOOGLE_AUTH_URL = process.env.GOOGLE_AUTH_URL || "https://accounts.google.
 const GOOGLE_TOKEN_URL = process.env.GOOGLE_TOKEN_URL || "https://oauth2.googleapis.com/token";
 const CODE_MS = 10 * 60e3, RESEND_COOLDOWN_MS = 30e3, MAX_CODE_TRIES = 5;
 
+// Appended to every system prompt (also the user's own custom instructions): how the model hands over real files
+const FILE_RULES = `FILES: you can hand the user real, downloadable files. When they ask for a PDF, a Word document (.docx), a PowerPoint (.pptx), or an Excel / Google Sheets spreadsheet (.xlsx), or one of those is clearly the best deliverable, write one short sentence and then ONE fenced code block whose language is neon-pdf, neon-docx, neon-pptx or neon-xlsx. The app turns the block into a file with a preview and a download button, so never tell the user to copy, print, save as HTML or paste it into another program.
+Block layout: optional header lines first (title: My Title, and for neon-pptx optionally theme: dark), then the content.
+- neon-pdf and neon-docx: the whole document in Markdown (# headings, paragraphs, **bold**, *italic*, lists, tables, > quotes, --- rules). No HTML.
+- neon-pptx: slides separated by a line containing only ---. The first slide starts with a # title (the cover, optional subtitle lines under it); the other slides start with a ## heading, then - bullets (indent two spaces for sub-bullets), short paragraphs or a Markdown table. Optional speaker notes on a line starting Notes:.
+- neon-xlsx: CSV rows. Start each sheet with a line sheet: Name. Quote cells that contain commas. A cell that starts with = is a formula (for example =SUM(B2:B10)). Write numbers without currency symbols or thousands separators.
+If the content itself contains code fences, open and close the outer block with four backticks. Use normal code blocks (html, python, ...) for code and web pages.`;
+
 const DAY = 24 * 60 * 60 * 1000;
 const REMEMBER_MS = 30 * DAY; // "stay logged in" lasts 30 days
 const SHORT_MS = 12 * 60 * 60 * 1000; // otherwise: until the browser closes (max 12 h)
@@ -1063,7 +1071,7 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
     .slice(-40);
   while (history.length && history[0].role !== "user") history.shift();
   if (!history.length) return res.status(400).json({ error: "No messages" });
-  const system = String(req.user.settings?.system || "").trim().slice(0, 4000) || SYSTEM;
+  const system = (String(req.user.settings?.system || "").trim().slice(0, 4000) || SYSTEM) + "\n\n" + FILE_RULES;
 
   const plan = effectivePlan(req.user);
   const use = await todayUsage(req.user.id);
