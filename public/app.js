@@ -16,7 +16,7 @@ const ls = {
 };
 
 // ---------- state ----------
-let config = { hasGoogle: false, mailReady: true, models: [], defaultModel: "", plans: [], freeTokens: 50000, plusClaudeMsgs: 50, hasKey: true, hasGemini: false, defaultEffort: 1 };
+let config = { hasGoogle: false, mailReady: true, models: [], defaultModel: "", plans: [], freeTokens: 25000, plusClaudeMsgs: 50, hasKey: true, hasGemini: false, defaultEffort: 1 };
 let user = null;
 let plan = { id: "free", requested: null, owner: false, usedTokens: 0, usedClaude: 0 };
 const readLook = () => { try { return JSON.parse(localStorage.getItem("neon-look") || "{}") || {}; } catch { return {}; } };
@@ -390,7 +390,7 @@ function showAuth(msg = "") {
 
 // ---------- plans ----------
 const PLAN_COPY = {
-  free: { badge: "", feats: ["50,000 Gemini tokens a day", "Gemini 3.5 Flash-Lite and 2.5 Flash", "Chats synced on every device", "Images, PDFs, Word and PowerPoint"], off: [], support: "Community support" },
+  free: { badge: "", feats: ["25,000 Gemini tokens a day", "Gemini 3.5 Flash-Lite and 2.5 Flash", "Chats synced on every device", "Images, PDFs, Word and PowerPoint"], off: [], support: "Community support" },
   spark: { badge: "", feats: ["Unlimited Gemini, no daily cap", "Gemini 3.5 Flash-Lite and 2.5 Flash", "Chats synced on every device", "Images, PDFs, Word and PowerPoint"], off: [], support: "Email support" },
   plus: { badge: "Popular", feats: ["Everything in Spark", "Claude Sonnet and Haiku", "Fair use: 50 Claude messages a day", "Unlimited Gemini"], off: [], support: "Priority email support" },
   max: { badge: "Best value", feats: ["Everything in Plus", "Claude Opus, the smartest model", "No limit on Claude messages", "Early access to new features"], off: [], support: "Priority support, answered first" },

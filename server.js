@@ -39,11 +39,11 @@ const DEFAULT_MODEL = process.env.DEFAULT_MODEL || (MODELS.some((m) => m.id === 
 // (users.plan_requested) and the account runs on Free. Set a user's real plan by hand with
 //   update users set plan = 'max' where username_lc = '...';   (free | spark | plus | max)
 // OWNER_USERNAMES (comma separated) always get full access.
-const FREE_GEMINI_TOKENS_PER_DAY = 50000;
+const FREE_GEMINI_TOKENS_PER_DAY = 25000;
 const PLUS_CLAUDE_MSGS_PER_DAY = 50;
 const PLAN_IDS = ["free", "spark", "plus", "max"];
 const PLANS = [
-  { id: "free", name: "Free", price: 0, tag: "Try it out", gemini: "50k tokens / day", claude: "none" },
+  { id: "free", name: "Free", price: 0, tag: "Try it out", gemini: "25k tokens / day", claude: "none" },
   { id: "spark", name: "Spark", price: 5, tag: "Unlimited Gemini", gemini: "unlimited", claude: "none" },
   { id: "plus", name: "Plus", price: 12, tag: "Gemini + Claude", gemini: "unlimited", claude: "limited" },
   { id: "max", name: "Max", price: 22, tag: "Everything, unlimited", gemini: "unlimited", claude: "unlimited" },
