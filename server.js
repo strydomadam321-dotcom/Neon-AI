@@ -18,6 +18,7 @@ const CLAUDE_MODELS = [
 // Gemini models (free API key). Override with GEMINI_MODELS="id|Display name,id|Display name"
 const GEMINI_DEFAULTS = [
   { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash-Lite · fastest", provider: "gemini" },
+  { id: "gemini-3.6-flash", name: "Gemini 3.6 Flash · newest", provider: "gemini" },
   { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash · balanced", provider: "gemini" },
 ];
 const GEMINI_MODELS = process.env.GEMINI_MODELS
@@ -26,13 +27,13 @@ const GEMINI_MODELS = process.env.GEMINI_MODELS
       return { id, name: name || id, provider: "gemini" };
     }).filter((m) => /^[\w.\-]{3,60}$/.test(m.id))
   : GEMINI_DEFAULTS;
-const MODELS = [...CLAUDE_MODELS, ...GEMINI_MODELS];
+const MODELS = [...GEMINI_MODELS, ...CLAUDE_MODELS];   // Gemini first, Claude below
 const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_BASE = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com";
 // Model used for chat titles (tried first). Override with TITLE_MODEL.
 const TITLE_MODEL = process.env.TITLE_MODEL || "gemini-3.5-flash";
 const DEFAULT_EFFORT = 1; // 0 Low, 1 Medium, 2 High, 3 Max
-const DEFAULT_MODEL = process.env.DEFAULT_MODEL || MODELS[0].id;
+const DEFAULT_MODEL = process.env.DEFAULT_MODEL || (MODELS.some((m) => m.id === "gemini-3.5-flash-lite") ? "gemini-3.5-flash-lite" : MODELS[0].id);
 // ---------- plans ----------
 // Payments are not connected yet, so nobody can buy a paid plan: choosing one at signup is only recorded
 // (users.plan_requested) and the account runs on Free. Set a user's real plan by hand with
@@ -261,7 +262,7 @@ form.bad input{border-color:#ff5c7a;animation:shake .4s}
   <p class="brand">NEON AI</p>
   <h1>NEON AI has been NUKED</h1>
   <p class="sub">The whole site has been shut down. It will be back when it's turned on again.</p>
-  <button class="btn" id="fairs" type="button">#Fairs</button>
+  <button class="btn" id="fairs" type="button">Fairs</button>
   <div class="or"><span>or enter the bypass code</span></div>
   <form id="bp" autocomplete="off"><input id="code" type="password" placeholder="Bypass code" aria-label="Bypass code" spellcheck="false" autocapitalize="none" maxlength="120"><button class="btn" id="go" type="submit">Enter</button></form>
   <div id="err" role="alert"></div>
@@ -273,7 +274,7 @@ form.bad input{border-color:#ff5c7a;animation:shake .4s}
   var pre=new Image();pre.src="/_nuked/fairs.gif";           // load it ahead so it appears instantly
   document.getElementById("fairs").addEventListener("click",function(){
     if(busy)return;busy=true;pimg.src="/_nuked/fairs.gif";pop.classList.add("on");pop.setAttribute("aria-hidden","false");
-    setTimeout(function(){pop.classList.remove("on");pop.setAttribute("aria-hidden","true");busy=false;},500);   // gone after half a second
+    setTimeout(function(){pop.classList.remove("on");pop.setAttribute("aria-hidden","true");busy=false;},1000);   // gone after one second
   });
   var form=document.getElementById("bp"),code=document.getElementById("code"),err=document.getElementById("err");
   form.addEventListener("submit",function(e){

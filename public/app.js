@@ -1017,7 +1017,8 @@ async function loadList() {
 }
 
 // ----- custom model dropdown (native <select> stays hidden as the source of truth) -----
-const MODEL_STYLE = { "claude-opus-5-5": ["#00e5ff", "0,229,255"], "claude-sonnet-5-5": ["#8b5cf6", "139,92,246"], "claude-haiku-5-5": ["#ff2bd6", "255,43,214"] };
+const MODEL_STYLE = { "claude-opus-5-5": ["#00e5ff", "0,229,255"], "claude-sonnet-5-5": ["#8b5cf6", "139,92,246"], "claude-haiku-5-5": ["#ff2bd6", "255,43,214"],
+  "gemini-3.5-flash-lite": ["#3dffa8", "61,255,168"], "gemini-3.6-flash": ["#5b8cff", "91,140,255"], "gemini-2.5-flash": ["#ffb347", "255,179,71"] };
 const GEMINI_COLORS = [["#3dffa8", "61,255,168"], ["#ffb347", "255,179,71"], ["#5b8cff", "91,140,255"], ["#ff5c7a", "255,92,122"]];
 const styleFor = (id) => MODEL_STYLE[id] || GEMINI_COLORS[Math.max(0, config.models.filter((m) => m.provider === "gemini").findIndex((m) => m.id === id)) % GEMINI_COLORS.length];
 const dd = { root: $("modelDD"), btn: $("ddBtn"), menu: $("ddMenu"), label: $("ddLabel"), idx: -1 };
