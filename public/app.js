@@ -22,6 +22,7 @@ let plan = { id: "free", requested: null, owner: false, usedTokens: 0, usedClaud
 const readLook = () => { try { return JSON.parse(localStorage.getItem("neon-look") || "{}") || {}; } catch { return {}; } };
 let settings = { system: "", model: "", effort: 1, retro: true, bg: true, flicker: true, gfx: readLook().gfx === "gpu" ? "gpu" : "cpu" };
 let chats = [];          // metadata list for the sidebar: {id,title,model,created,updated}
+let bootOpen = false;   // true while the last chat is re-opened on page load
 let current = null;      // active chat (full object incl. messages)
 let pending = [];        // attachments waiting to be sent
 let busy = false;
@@ -927,7 +928,7 @@ async function openChat(id) {
     const { chat } = await api(`/api/chats/${id}`);
     current = chat;
   } catch (err) { toast(err.message, "err"); return; }
-  if (current.model && [...els.model.options].some((o) => o.value === current.model)) { els.model.value = current.model; syncModelUI(); }
+  if (!bootOpen && current.model && [...els.model.options].some((o) => o.value === current.model)) { els.model.value = current.model; syncModelUI(); }
   pending = []; renderPending(); renderMessages(); renderList();
   ls.set("neon-last-" + user.username, id);
 }
@@ -1629,14 +1630,14 @@ async function enterApp(data) {
   els.model.innerHTML = "";
   config.models.forEach((m) => { const o = new Option(m.name, m.id); o.dataset.provider = m.provider; els.model.add(o); });
   const okModel = (id) => config.models.some((m) => m.id === id) && !modelLocked(id);
-  els.model.value = okModel(settings.model) ? settings.model : okModel(config.defaultModel) ? config.defaultModel : (config.models.find((m) => !modelLocked(m.id)) || config.models[0]).id;
+  els.model.value = okModel(config.defaultModel) ? config.defaultModel : okModel(settings.model) ? settings.model : (config.models.find((m) => !modelLocked(m.id)) || config.models[0]).id;
   buildModelMenu(); renderPlanSettings(); $("devSec").hidden = !user.dev;
   if (config.hasKey === false) $("emptyMsg").textContent = "The server has no ANTHROPIC_API_KEY yet. Add it in Render's environment settings.";
   els.search.value = "";
   current = null;
   try { chats = (await api("/api/chats")).chats; } catch { chats = []; }
   const last = ls.get("neon-last-" + user.username);
-  if (last && chats.some((c) => c.id === last)) await openChat(last); else startNew();
+  bootOpen = true; try { if (last && chats.some((c) => c.id === last)) await openChat(last); else startNew(); } finally { bootOpen = false; }   // a refresh always starts on the default model, not the last chat's
   renderList();
   retitleOld();
   clearInterval(syncTimer);

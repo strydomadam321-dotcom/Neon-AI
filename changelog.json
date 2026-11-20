@@ -1,5 +1,17 @@
 [
   {
+    "version": "2.0.1",
+    "date": "20 November 2026",
+    "title": "NEON AI V2.0.1",
+    "tag": "Fix",
+    "items": [
+      {
+        "icon": "🔧",
+        "text": "<b>Default model.</b> After a refresh, NEON AI now always starts on Gemini 3.5 Flash-Lite instead of the model your last chat used."
+      }
+    ]
+  },
+  {
     "version": "2.0",
     "date": "20 November 2026",
     "title": "NEON AI V2",
