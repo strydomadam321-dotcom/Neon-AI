@@ -227,6 +227,7 @@ function setMode(m, instant) {
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => { if (t.dataset.mode !== mode) setMode(t.dataset.mode); }));
 
 $("googleBtn").onclick = googleGo; $("googleBtn2").onclick = googleGo;
+addEventListener("pageshow", (e) => { if (e.persisted) [$("googleBtn"), $("googleBtn2")].forEach((x) => (x.disabled = false)); });   // coming back from Google with the Back button
 $("togglePw").onclick = () => {
   const show = authEls.pass.type === "password";
   authEls.pass.type = show ? "text" : "password";
@@ -1302,5 +1303,6 @@ async function enterApp(data) {
     if (welcome) toast("Account created with Google. Welcome aboard.");
   } catch {
     showAuth(authErr || "");
+    if (authErr) toast(authErr, "err");
   }
 })();
