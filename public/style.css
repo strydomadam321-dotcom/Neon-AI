@@ -1166,3 +1166,5 @@ body.in-app .rs-dim { opacity: 1; }
 .wn-tx b.c-chess { --c: #3dffa8; --r: 61, 255, 168; }
 .wn-tx b.c-larp { --c: #ffd166; --r: 255, 209, 102; animation-delay: -1.2s; }
 @keyframes cmdGlow { 50% { box-shadow: 0 0 24px rgba(var(--r), .55), inset 0 0 12px rgba(var(--r), .2); text-shadow: 0 0 18px var(--c); } }
+.wn-tx b.cmd { padding: 0; margin-right: 0; border: 0; background: none; box-shadow: none; border-radius: 0; text-shadow: 0 0 10px var(--c); animation: cmdTxt 2.4s ease-in-out infinite; }
+@keyframes cmdTxt { 50% { text-shadow: 0 0 20px var(--c), 0 0 4px var(--c); } }
