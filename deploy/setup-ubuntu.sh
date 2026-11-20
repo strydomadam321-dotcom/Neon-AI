@@ -107,6 +107,11 @@ else
       echo "DATABASE_URL=$(quote "postgres://$DB_USER:$DB_PASS@127.0.0.1:5432/$DB_NAME")"
       echo "ANTHROPIC_API_KEY=$(quote "${ANTHROPIC_API_KEY:-}")"
       echo "GEMINI_API_KEY=$(quote "${GEMINI_API_KEY:-}")"
+      echo "# Email codes (Resend) and Google sign-in: fill these in, then restart"
+      echo "RESEND_API_KEY=\"\""
+      echo "MAIL_FROM=\"NEON AI <noreply@example.com>\""
+      echo "GOOGLE_CLIENT_ID=\"\""
+      echo "GOOGLE_CLIENT_SECRET=\"\""
     } > "$ENV_FILE" )
   if [ "$DRY" = 0 ]; then chown root:"$APP_USER" "$ENV_FILE" 2>/dev/null || true; chmod 640 "$ENV_FILE"; fi
 fi

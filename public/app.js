@@ -16,7 +16,7 @@ const ls = {
 };
 
 // ---------- state ----------
-let config = { models: [], defaultModel: "", plans: [], freeTokens: 50000, plusClaudeMsgs: 50, hasKey: true, hasGemini: false, defaultEffort: 1 };
+let config = { hasGoogle: false, mailReady: true, models: [], defaultModel: "", plans: [], freeTokens: 50000, plusClaudeMsgs: 50, hasKey: true, hasGemini: false, defaultEffort: 1 };
 let user = null;
 let plan = { id: "free", requested: null, owner: false, usedTokens: 0, usedClaude: 0 };
 const readLook = () => { try { return JSON.parse(localStorage.getItem("neon-look") || "{}") || {}; } catch { return {}; } };
@@ -85,7 +85,7 @@ let step = 1;
 const SPRING = "cubic-bezier(.3, 1.25, .4, 1)";
 let lblTxt = "";
 function syncStep(animate) {
-  const lbl = authEls.btn.querySelector(".lbl"), t = mode === "login" ? "Sign in" : step === 1 ? "Next" : "Create account";
+  const lbl = authEls.btn.querySelector(".lbl"), t = mode === "login" ? "Sign in" : step === 1 ? "Next" : step === 2 ? "Create account" : "Verify";
   if (t !== lblTxt) {
     if (animate && lblTxt) {
       const out = lbl.animate([{ opacity: 1, filter: "blur(0)", transform: "translateY(0)" }, { opacity: 0, filter: "blur(4px)", transform: "translateY(-6px)" }], { duration: 140, fill: "forwards" });
@@ -96,8 +96,8 @@ function syncStep(animate) {
     } else lbl.textContent = t;
     lblTxt = t;
   }
-  document.querySelectorAll("#stepper i").forEach((d, i) => d.classList.toggle("on", i < step));
-  $("stepTxt").textContent = `Step ${step} of 2`;
+  document.querySelectorAll("#stepper i").forEach((d, i) => d.classList.toggle("on", i < Math.min(step, 2)));
+  $("stepTxt").textContent = `Step ${Math.min(step, 2)} of 2`;   // the code screen is not shown as a third step (Google users skip it)
 }
 // slide between the two signup steps while the box stretches or shrinks to the new content
 function goStep(n, instant) {
@@ -115,10 +115,62 @@ function goStep(n, instant) {
     wrap.style.height = h1 + "px";
     const an = wrap.animate([{ height: h0 + "px" }, { height: h1 + "px" }], { duration: 700, easing: SPRING });
     an.onfinish = an.oncancel = () => { wrap.style.height = ""; wrap.classList.remove("morphing"); };
-    (n === 2 ? $("email") : authEls.user).focus({ preventScroll: true });
+    (n === 3 ? otpBoxes[0] : n === 2 ? $("email") : authEls.user).focus({ preventScroll: true });
   }, 230);
 }
 $("backBtn").onclick = () => goStep(1);
+$("backBtn3").onclick = () => { clearInterval(resendTimer); goStep(2); };
+
+// ---------- 6-digit code boxes ----------
+const otpBoxes = [...document.querySelectorAll(".otp-i")];
+const otpCode = () => otpBoxes.map((b) => b.value).join("");
+function otpClear() { otpBoxes.forEach((b) => { b.value = ""; b.classList.remove("filled"); }); $("otp").classList.remove("bad"); }
+function otpFill(digits, from = 0) {
+  const d = String(digits).replace(/\D/g, "").slice(0, 6 - from);
+  [...d].forEach((c, i) => { const b = otpBoxes[from + i]; b.value = c; b.classList.add("filled"); });
+  const next = Math.min(from + d.length, 5);
+  otpBoxes[next].focus();
+  if (otpCode().length === 6) setTimeout(() => authEls.form.requestSubmit(), 180);   // all six in: verify right away
+}
+otpBoxes.forEach((b, i) => {
+  b.addEventListener("input", () => {
+    $("otp").classList.remove("bad"); authEls.err.textContent = "";
+    const v = b.value.replace(/\D/g, "");
+    if (v.length > 1) { b.value = ""; otpFill(v, i); return; }          // autofill / fast typing dropped several digits in one box
+    b.value = v; b.classList.toggle("filled", !!v);
+    if (v) { if (i < 5) otpBoxes[i + 1].focus(); if (otpCode().length === 6) setTimeout(() => authEls.form.requestSubmit(), 180); }
+  });
+  b.addEventListener("keydown", (e) => {
+    if (e.key === "Backspace" && !b.value && i > 0) { otpBoxes[i - 1].value = ""; otpBoxes[i - 1].classList.remove("filled"); otpBoxes[i - 1].focus(); e.preventDefault(); }
+    else if (e.key === "ArrowLeft" && i > 0) { otpBoxes[i - 1].focus(); e.preventDefault(); }
+    else if (e.key === "ArrowRight" && i < 5) { otpBoxes[i + 1].focus(); e.preventDefault(); }
+  });
+  b.addEventListener("paste", (e) => { e.preventDefault(); const t = (e.clipboardData || window.clipboardData).getData("text"); if (/\d/.test(t)) otpFill(t, 0); });
+  b.addEventListener("focus", () => b.select());
+});
+let resendTimer = 0, signupEmail = "";
+function startResendCooldown(sec) {
+  clearInterval(resendTimer);
+  const txt = $("resendTxt"), btn = $("resendBtn"); let left = sec;
+  btn.hidden = true; txt.textContent = `Didn't get it? Resend in ${left}s`;
+  resendTimer = setInterval(() => {
+    left--;
+    if (left <= 0) { clearInterval(resendTimer); txt.textContent = "Didn't get it?"; btn.hidden = false; }
+    else txt.textContent = `Didn't get it? Resend in ${left}s`;
+  }, 1000);
+}
+$("resendBtn").onclick = async () => {
+  $("resendBtn").disabled = true;
+  try {
+    const d = await api("/api/signup/resend", { method: "POST", noAuthRedirect: true, body: { email: signupEmail } });
+    otpClear(); otpBoxes[0].focus(); authEls.err.textContent = ""; startResendCooldown(d.cooldown || 30); toast("New code sent.");
+  } catch (e) { authEls.err.textContent = e.message; }
+  finally { $("resendBtn").disabled = false; }
+};
+function googleGo() {
+  if (!config.hasGoogle) { toast("Google sign-in isn't set up yet.", "err"); return; }
+  location.href = "/api/auth/google?remember=" + ($("remember").checked ? 1 : 0);
+}
 const authEls = { form: $("authForm"), user: $("username"), pass: $("password"), err: $("authErr"), btn: $("authSubmit") };
 
 function setMode(m, instant) {
@@ -128,13 +180,14 @@ function setMode(m, instant) {
   authEls.pass.autocomplete = m === "login" ? "current-password" : "new-password";
   $("strengthC").classList.toggle("open", m === "signup");
   $("stepperC").classList.toggle("open", m === "signup");
+  $("gLoginC").classList.toggle("open", m === "login");
   if (step !== 1) goStep(1, instant); else syncStep(!instant);
   authEls.err.textContent = "";
   document.querySelectorAll(".field.bad").forEach((f) => f.classList.remove("bad"));
 }
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => { if (t.dataset.mode !== mode) setMode(t.dataset.mode); }));
 
-$("googleBtn").onclick = () => toast("Google sign-up is coming soon.");
+$("googleBtn").onclick = googleGo; $("googleBtn2").onclick = googleGo;
 $("togglePw").onclick = () => {
   const show = authEls.pass.type === "password";
   authEls.pass.type = show ? "text" : "password";
@@ -172,20 +225,27 @@ authEls.form.onsubmit = async (e) => {
   if (mode === "signup" && password.length < 8) return fieldErr("fPass", "Password must be at least 8 characters.");
   if (mode === "signup" && step === 1) { goStep(2); return; }
   const email = $("email").value.trim();
-  if (mode === "signup" && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fieldErr("fEmail", "Enter a valid email address.");
+  if (mode === "signup" && step === 2 && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fieldErr("fEmail", "Enter a valid email address.");
+  if (mode === "signup" && step === 3 && otpCode().length < 6) { $("otp").classList.remove("bad"); void $("otp").offsetWidth; $("otp").classList.add("bad"); authEls.err.textContent = "Enter the 6-digit code."; return; }
   authEls.btn.classList.add("loading"); authEls.btn.disabled = true;
   try {
-    const data = await api(mode === "login" ? "/api/login" : "/api/signup", {
-      method: "POST", noAuthRedirect: true,
-      body: { username, password, remember: $("remember").checked, email },
-    });
-    authEls.pass.value = ""; $("email").value = "";
+    let data;
+    if (mode === "login") data = await api("/api/login", { method: "POST", noAuthRedirect: true, body: { username, password, remember: $("remember").checked } });
+    else if (step === 2) {
+      // email route: send the code, then slide to the code screen
+      const d = await api("/api/signup/start", { method: "POST", noAuthRedirect: true, body: { username, password, email } });
+      signupEmail = email.toLowerCase(); $("codeSub").textContent = `We sent a 6-digit code to ${d.email}. It's valid for 10 minutes.`;
+      otpClear(); startResendCooldown(d.cooldown || 30); goStep(3);
+      return;
+    } else data = await api("/api/signup/verify", { method: "POST", noAuthRedirect: true, body: { email: signupEmail, code: otpCode(), remember: $("remember").checked } });
+    authEls.pass.value = ""; $("email").value = ""; otpClear(); clearInterval(resendTimer);
     await enterApp(data);
     if (mode === "signup") toast("Account created. Welcome aboard.");
   } catch (err) {
     const map = { email: "fEmail", username: "fUser", password: "fPass" };
-    if (map[err.field]) {
-      if (mode === "signup" && step === 2 && err.field !== "email") { goStep(1); setTimeout(() => fieldErr(map[err.field], err.message), 300); }
+    if (err.field === "code") { otpClear(); void $("otp").offsetWidth; $("otp").classList.add("bad"); authEls.err.textContent = err.message; if (!err.expired) otpBoxes[0].focus(); }
+    else if (map[err.field]) {
+      if (mode === "signup" && step >= 2 && err.field !== "email") { goStep(1); setTimeout(() => fieldErr(map[err.field], err.message), 300); }
       else fieldErr(map[err.field], err.message);
     }
     else { authEls.err.textContent = err.message; if (err.status === 401) { const f = $("fPass"); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad"); } }
@@ -1043,16 +1103,17 @@ $("deleteAcct").onclick = async () => {
     ok: "Continue", danger: true,
   });
   if (!first) return;
-  // warning 2: final warning, password required
+  // warning 2: final warning, password required (Google accounts have none, so they type their username)
+  const viaGoogle = user.hasPassword === false;
   const pw = await dialog({
     title: "Final warning",
-    message: `Last chance. "${user.username}" and all of its chats will be erased forever. Enter your password to confirm.`,
-    input: "", password: true, placeholder: "Your password", ok: "Delete my account forever", danger: true,
+    message: viaGoogle ? `Last chance. "${user.username}" and all of its chats will be erased forever. Type your username to confirm.` : `Last chance. "${user.username}" and all of its chats will be erased forever. Enter your password to confirm.`,
+    input: "", password: !viaGoogle, placeholder: viaGoogle ? user.username : "Your password", ok: "Delete my account forever", danger: true,
   });
   if (pw === null) return;
-  if (!pw) { toast("Enter your password to confirm.", "err"); return; }
+  if (!pw) { toast(viaGoogle ? "Type your username to confirm." : "Enter your password to confirm.", "err"); return; }
   try {
-    await api("/api/account/delete", { method: "POST", body: { password: pw }, noAuthRedirect: true });
+    await api("/api/account/delete", { method: "POST", body: viaGoogle ? { confirm: pw } : { password: pw }, noAuthRedirect: true });
     const name = user.username;
     try { localStorage.removeItem("neon-last-" + name); } catch {}
     closeSettings(true); showAuth(); toast("Your account was deleted.");
@@ -1114,11 +1175,14 @@ async function enterApp(data) {
 }
 
 (async function init() {
+  const qs = new URLSearchParams(location.search), authErr = qs.get("auth_error"), welcome = qs.has("welcome");
+  if (authErr || welcome) history.replaceState(null, "", location.pathname);
   try { config = await (await fetch("/api/config")).json(); } catch {}
   try {
     const data = await api("/api/me", { noAuthRedirect: true });
     await enterApp(data);
+    if (welcome) toast("Account created with Google. Welcome aboard.");
   } catch {
-    showAuth();
+    showAuth(authErr || "");
   }
 })();

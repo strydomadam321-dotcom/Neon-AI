@@ -53,6 +53,20 @@ const SYSTEM =
   "You are a helpful, sharp AI assistant inside a futuristic neon chat app. " +
   "Answer clearly and concisely. Use Markdown, and fenced code blocks with language tags for code.";
 
+// ---------- email codes (Resend) and Google sign-in ----------
+// RESEND_API_KEY + MAIL_FROM: sends the 6-digit verification codes (https://resend.com). Without a key, email sign-up is switched off.
+// GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET: "Continue with Google". Redirect URI to register in Google Cloud:
+//   https://YOUR-DOMAIN/api/auth/google/callback   (override with GOOGLE_REDIRECT_URI if needed)
+const RESEND_KEY = process.env.RESEND_API_KEY || "";
+const MAIL_FROM = process.env.MAIL_FROM || "NEON AI <onboarding@resend.dev>";
+const RESEND_URL = process.env.RESEND_URL || "https://api.resend.com/emails";
+const MAIL_DEBUG = process.env.MAIL_DEBUG === "1"; // local testing only: prints codes to the server log instead of emailing
+const MAIL_READY = !!RESEND_KEY || MAIL_DEBUG;
+const GOOGLE_ID = process.env.GOOGLE_CLIENT_ID || "", GOOGLE_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+const GOOGLE_AUTH_URL = process.env.GOOGLE_AUTH_URL || "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN_URL = process.env.GOOGLE_TOKEN_URL || "https://oauth2.googleapis.com/token";
+const CODE_MS = 10 * 60e3, RESEND_COOLDOWN_MS = 30e3, MAX_CODE_TRIES = 5;
+
 const DAY = 24 * 60 * 60 * 1000;
 const REMEMBER_MS = 30 * DAY; // "stay logged in" lasts 30 days
 const SHORT_MS = 12 * 60 * 60 * 1000; // otherwise: until the browser closes (max 12 h)
@@ -103,6 +117,20 @@ alter table users add column if not exists plan text not null default 'free';
 alter table users add column if not exists plan_requested text;
 alter table users add column if not exists email text;
 create unique index if not exists users_email_uq on users(email);
+alter table users add column if not exists email_verified boolean not null default false;
+alter table users add column if not exists google_sub text;
+alter table users add column if not exists has_password boolean not null default true;
+create unique index if not exists users_google_uq on users(google_sub);
+create table if not exists signup_pending(
+  email text primary key,
+  username text not null,
+  username_lc text not null,
+  pass_hash text not null,
+  code_hash text not null,
+  attempts int not null default 0,
+  expires_at timestamptz not null,
+  sent_at timestamptz not null default now()
+);
 create table if not exists usage(
   user_id int not null references users(id) on delete cascade,
   day date not null default current_date,
@@ -117,7 +145,7 @@ create table if not exists meta(key text primary key, done_at timestamptz not nu
   const r = await q("insert into meta(key) values('reset-2026-11-plans') on conflict do nothing returning key");
   if (r.rowCount) { await q("truncate users restart identity cascade"); console.log("One-time reset done: all accounts and chats removed."); }
 }
-const cleanup = () => q("delete from sessions where expires_at < now()").catch(() => {});
+const cleanup = () => { q("delete from sessions where expires_at < now()").catch(() => {}); q("delete from signup_pending where expires_at < now() - interval '1 hour'").catch(() => {}); };
 cleanup();
 setInterval(cleanup, 60 * 60 * 1000).unref();
 
@@ -172,7 +200,7 @@ const requireAuth = wrap(async (req, res, next) => {
   const token = getCookie(req, COOKIE);
   if (!token) return res.status(401).json({ error: "Not signed in" });
   const { rows } = await q(
-    `select u.id, u.username, u.settings, u.plan, u.plan_requested from sessions s join users u on u.id = s.user_id
+    `select u.id, u.username, u.settings, u.plan, u.plan_requested, u.has_password from sessions s join users u on u.id = s.user_id
      where s.token_hash = $1 and s.expires_at > now()`, [sha(token)]);
   if (!rows[0]) { res.clearCookie(COOKIE, { path: "/" }); return res.status(401).json({ error: "Session expired" }); }
   req.user = rows[0]; req.token = token;
@@ -193,34 +221,164 @@ const big = express.json({ limit: "45mb" });
 
 // ---------- auth ----------
 app.get("/api/config", (req, res) => {
-  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: false, hasKey: !!process.env.ANTHROPIC_API_KEY, hasGemini: !!GEMINI_KEY, defaultEffort: DEFAULT_EFFORT });
+  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: false, hasKey: !!process.env.ANTHROPIC_API_KEY, hasGemini: !!GEMINI_KEY, hasGoogle: !!(GOOGLE_ID && GOOGLE_SECRET), mailReady: MAIL_READY, defaultEffort: DEFAULT_EFFORT });
 });
 
 const USER_RE = /^[A-Za-z0-9_.-]{3,24}$/;
 const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", 10);
 
-app.post("/api/signup", small, wrap(async (req, res) => {
-  if (limited("signup:" + req.ip, 8, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
-  const { username, password, remember, email } = req.body || {};
-  const emailOk = typeof email === "string" && email.length <= 120 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
-  if (!emailOk) return res.status(400).json({ error: "Enter a valid email address.", field: "email" });
-  if (typeof username !== "string" || !USER_RE.test(username))
-    return res.status(400).json({ error: "Username must be 3-24 characters: letters, numbers, . _ -", field: "username" });
-  if (typeof password !== "string" || password.length < 8)
-    return res.status(400).json({ error: "Password must be at least 8 characters.", field: "password" });
-  if (Buffer.byteLength(password) > 72)
-    return res.status(400).json({ error: "Password is too long (72 bytes max).", field: "password" });
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const codeHash = (em, code) => sha(`${em}:${code}:${process.env.CODE_PEPPER || "neon"}`);
+const maskEmail = (em) => { const [l, d] = em.split("@"); return (l.length <= 2 ? l[0] + "*" : l[0] + "*".repeat(Math.min(5, l.length - 2)) + l.slice(-1)) + "@" + d; };
+
+async function sendCodeEmail(to, code) {
+  if (!RESEND_KEY) { console.log(`[mail debug] code for ${to}: ${code}`); return; }
+  const html = `<div style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:420px;margin:0 auto;padding:28px;color:#111">
+    <h2 style="margin:0 0 6px;font-size:20px">Verify your email</h2>
+    <p style="margin:0 0 18px;color:#555">Use this code to finish creating your NEON AI account.</p>
+    <div style="font-size:34px;letter-spacing:10px;font-weight:700;background:#f3f1ff;border-radius:12px;padding:16px 0;text-align:center;font-family:ui-monospace,Menlo,Consolas,monospace">${code}</div>
+    <p style="margin:18px 0 0;color:#777;font-size:13px">This code expires in 10 minutes. If you didn't try to sign up, you can ignore this email.</p></div>`;
+  const r = await fetch(RESEND_URL, {
+    method: "POST", signal: AbortSignal.timeout(15000),
+    headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: MAIL_FROM, to: [to], subject: `${code} is your NEON AI verification code`, html, text: `Your NEON AI verification code is ${code}. It expires in 10 minutes.` }),
+  });
+  if (!r.ok) { const t = await r.text().catch(() => ""); throw new Error(`Resend ${r.status}: ${t.slice(0, 200)}`); }
+}
+
+function checkSignupFields({ username, password, email }) {
+  if (typeof email !== "string" || email.length > 120 || !EMAIL_RE.test(email.trim())) return { error: "Enter a valid email address.", field: "email" };
+  if (typeof username !== "string" || !USER_RE.test(username)) return { error: "Username must be 3-24 characters: letters, numbers, . _ -", field: "username" };
+  if (typeof password !== "string" || password.length < 8) return { error: "Password must be at least 8 characters.", field: "password" };
+  if (Buffer.byteLength(password) > 72) return { error: "Password is too long (72 bytes max).", field: "password" };
+  return null;
+}
+
+// step 1 of email sign-up: nothing is created yet, we just email a code
+app.post("/api/signup/start", small, wrap(async (req, res) => {
+  if (limited("sstart:" + req.ip, 10, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
+  const bad = checkSignupFields(req.body || {});
+  if (bad) return res.status(400).json(bad);
+  if (!MAIL_READY) return res.status(503).json({ error: "Email sign-up isn't available yet. Try Continue with Google instead.", field: "email" });
+  const { username, password } = req.body, em = req.body.email.trim().toLowerCase();
+  if (limited("smail:" + em, 5, 60 * 60e3)) return res.status(429).json({ error: "Too many codes sent to that email. Try again in an hour.", field: "email" });
+  const { rows: dup } = await q("select username_lc = $1 as u, email = $2 as e from users where username_lc = $1 or email = $2", [username.toLowerCase(), em]);
+  if (dup.some((r) => r.e)) return res.status(409).json({ error: "That email already has an account. Sign in instead.", field: "email" });
+  if (dup.some((r) => r.u)) return res.status(409).json({ error: "That username is taken.", field: "username" });
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
   const hash = await bcrypt.hash(password, 11);
+  await q(`insert into signup_pending(email,username,username_lc,pass_hash,code_hash,attempts,expires_at,sent_at) values($1,$2,$3,$4,$5,0,$6,now())
+           on conflict(email) do update set username=$2, username_lc=$3, pass_hash=$4, code_hash=$5, attempts=0, expires_at=$6, sent_at=now()`,
+    [em, username, username.toLowerCase(), hash, codeHash(em, code), new Date(Date.now() + CODE_MS)]);
+  try { await sendCodeEmail(em, code); }
+  catch (e) {
+    console.error("send code failed:", e.message);
+    await q("delete from signup_pending where email = $1", [em]).catch(() => {});
+    return res.status(502).json({ error: "We couldn't send the email. Check the address and try again in a moment.", field: "email" });
+  }
+  res.json({ sent: true, email: maskEmail(em), cooldown: RESEND_COOLDOWN_MS / 1000 });
+}));
+
+app.post("/api/signup/resend", small, wrap(async (req, res) => {
+  const em = String(req.body?.email || "").trim().toLowerCase();
+  if (limited("sresend:" + req.ip, 12, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
+  const { rows } = await q("select sent_at from signup_pending where email = $1", [em]);
+  if (!rows[0]) return res.status(400).json({ error: "Start again to get a new code.", field: "code" });
+  const wait = Math.ceil((new Date(rows[0].sent_at).getTime() + RESEND_COOLDOWN_MS - Date.now()) / 1000);
+  if (wait > 0) return res.status(429).json({ error: `Wait ${wait}s before asking for another code.`, wait });
+  if (limited("smail:" + em, 5, 60 * 60e3)) return res.status(429).json({ error: "Too many codes sent to that email. Try again in an hour." });
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+  await q("update signup_pending set code_hash=$2, attempts=0, expires_at=$3, sent_at=now() where email=$1", [em, codeHash(em, code), new Date(Date.now() + CODE_MS)]);
+  try { await sendCodeEmail(em, code); } catch (e) { console.error("resend failed:", e.message); return res.status(502).json({ error: "We couldn't send the email. Try again in a moment." }); }
+  res.json({ sent: true, cooldown: RESEND_COOLDOWN_MS / 1000 });
+}));
+
+// step 3 of email sign-up: the right code creates the account
+app.post("/api/signup/verify", small, wrap(async (req, res) => {
+  if (limited("sverify:" + req.ip, 30, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
+  const em = String(req.body?.email || "").trim().toLowerCase(), code = String(req.body?.code || "").replace(/\D/g, "");
+  if (code.length !== 6) return res.status(400).json({ error: "Enter the 6-digit code.", field: "code" });
+  const { rows } = await q("select * from signup_pending where email = $1", [em]);
+  const p = rows[0];
+  if (!p || new Date(p.expires_at) < new Date()) return res.status(400).json({ error: "That code has expired. Tap Resend to get a new one.", field: "code", expired: true });
+  if (p.attempts >= MAX_CODE_TRIES) return res.status(429).json({ error: "Too many wrong tries. Tap Resend to get a new code.", field: "code", expired: true });
+  const a = Buffer.from(codeHash(em, code)), b = Buffer.from(p.code_hash);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    const left = MAX_CODE_TRIES - p.attempts - 1;
+    await q("update signup_pending set attempts = attempts + 1 where email = $1", [em]);
+    return res.status(400).json({ error: left > 0 ? `That code isn't right. ${left} ${left === 1 ? "try" : "tries"} left.` : "Too many wrong tries. Tap Resend to get a new code.", field: "code", expired: left <= 0 });
+  }
   let user;
   try {
-    ({ rows: [user] } = await q("insert into users(username,username_lc,pass_hash,email) values($1,$2,$3,$4) returning id,username,settings,plan,plan_requested",
-      [username, username.toLowerCase(), hash, email.trim().toLowerCase()]));
+    ({ rows: [user] } = await q("insert into users(username,username_lc,pass_hash,email,email_verified) values($1,$2,$3,$4,true) returning id,username,settings,plan,plan_requested,has_password",
+      [p.username, p.username_lc, p.pass_hash, em]));
   } catch (e) {
-    if (e.code === "23505") return /email/.test(e.constraint || "") ? res.status(409).json({ error: "That email already has an account.", field: "email" }) : res.status(409).json({ error: "That username is taken.", field: "username" });
+    if (e.code === "23505") return /email/.test(e.constraint || "") ? res.status(409).json({ error: "That email already has an account. Sign in instead.", field: "email" }) : res.status(409).json({ error: "That username was just taken. Pick another.", field: "username" });
     throw e;
   }
-  await startSession(req, res, user.id, !!remember);
+  await q("delete from signup_pending where email = $1", [em]);
+  await startSession(req, res, user.id, !!req.body?.remember);
   res.json(await mePayload(user));
+}));
+
+// ---------- Google sign-in (authorization-code flow) ----------
+const GCOOKIE = "neon_gs";
+const googleRedirectUri = (req) => process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
+const authFail = (res, msg) => res.redirect("/?auth_error=" + encodeURIComponent(msg));
+
+app.get("/api/auth/google", (req, res) => {
+  if (!GOOGLE_ID || !GOOGLE_SECRET) return authFail(res, "Google sign-in isn't set up yet.");
+  if (limited("gstart:" + req.ip, 30, 60 * 60e3)) return authFail(res, "Too many attempts. Try again later.");
+  const state = crypto.randomBytes(24).toString("base64url"), remember = req.query.remember === "1" ? "1" : "0";
+  res.cookie(GCOOKIE, `${state}.${remember}`, { httpOnly: true, sameSite: "lax", secure: req.secure, maxAge: 10 * 60e3, path: "/api/auth" });
+  const u = new URL(GOOGLE_AUTH_URL);
+  u.search = new URLSearchParams({ client_id: GOOGLE_ID, redirect_uri: googleRedirectUri(req), response_type: "code", scope: "openid email profile", state, prompt: "select_account" }).toString();
+  res.redirect(u.toString());
+});
+
+function usernameFromEmail(email) {
+  let base = email.split("@")[0].replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 18);
+  if (base.length < 3) base = (base + "user").slice(0, 18);
+  return base;
+}
+
+app.get("/api/auth/google/callback", wrap(async (req, res) => {
+  const [st, remember] = getCookie(req, GCOOKIE).split(".");
+  res.clearCookie(GCOOKIE, { path: "/api/auth" });
+  if (req.query.error) return authFail(res, "Google sign-in was cancelled.");
+  if (!GOOGLE_ID || !GOOGLE_SECRET || !st || st !== String(req.query.state || "") || !req.query.code) return authFail(res, "Google sign-in expired. Please try again.");
+  let claims;
+  try {
+    const r = await fetch(GOOGLE_TOKEN_URL, {
+      method: "POST", signal: AbortSignal.timeout(15000), headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ code: String(req.query.code), client_id: GOOGLE_ID, client_secret: GOOGLE_SECRET, redirect_uri: googleRedirectUri(req), grant_type: "authorization_code" }),
+    });
+    if (!r.ok) throw new Error("token " + r.status + " " + (await r.text().catch(() => "")).slice(0, 200));
+    const { id_token } = await r.json();
+    // the token came straight from Google over TLS in exchange for our secret, so its claims can be trusted; we still check them
+    claims = JSON.parse(Buffer.from(String(id_token).split(".")[1], "base64url").toString());
+  } catch (e) { console.error("google sign-in failed:", e.message); return authFail(res, "Google sign-in failed. Please try again."); }
+  const okIss = claims.iss === "https://accounts.google.com" || claims.iss === "accounts.google.com";
+  const verified = claims.email_verified === true || claims.email_verified === "true";
+  if (!okIss || claims.aud !== GOOGLE_ID || !(claims.exp * 1000 > Date.now()) || !claims.sub || !claims.email || !verified) return authFail(res, "Google couldn't verify that account.");
+  const email = String(claims.email).toLowerCase(), sub = String(claims.sub);
+  const cols = "id,username,settings,plan,plan_requested,has_password";
+  let user = (await q(`select ${cols} from users where google_sub = $1`, [sub])).rows[0], created = false;
+  if (!user) user = (await q(`update users set google_sub = $1, email_verified = true where email = $2 and google_sub is null returning ${cols}`, [sub, email])).rows[0]; // same email: link
+  if (!user) {
+    const hash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10); // nobody knows this password; they sign in with Google
+    const base = usernameFromEmail(email);
+    for (let i = 0; i < 25 && !user; i++) {
+      const name = i === 0 ? base : base.slice(0, 19) + String(crypto.randomInt(10, 9999));
+      try {
+        user = (await q(`insert into users(username,username_lc,pass_hash,email,email_verified,google_sub,has_password) values($1,$2,$3,$4,true,$5,false) returning ${cols}`, [name, name.toLowerCase(), hash, email, sub])).rows[0];
+        created = true;
+      } catch (e) { if (e.code !== "23505") throw e; if (/email|google/.test(e.constraint || "")) return authFail(res, "That Google account is already linked. Try signing in again."); }
+    }
+    if (!user) return authFail(res, "Couldn't create your account. Please try again.");
+  }
+  await startSession(req, res, user.id, remember === "1");
+  res.redirect(created ? "/?welcome=1" : "/");
 }));
 
 app.post("/api/login", small, wrap(async (req, res) => {
@@ -228,7 +386,7 @@ app.post("/api/login", small, wrap(async (req, res) => {
   if (typeof username !== "string" || typeof password !== "string") return res.status(400).json({ error: "Enter your username and password." });
   const key = "login:" + req.ip + ":" + username.toLowerCase();
   if (limited(key, 8, 15 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again in a few minutes." });
-  const { rows } = await q("select id,username,pass_hash,settings,plan,plan_requested from users where username_lc = $1", [username.toLowerCase()]);
+  const { rows } = await q("select id,username,pass_hash,settings,plan,plan_requested,has_password from users where username_lc = $1", [username.toLowerCase()]);
   const user = rows[0];
   const ok = await bcrypt.compare(password.slice(0, 200), user ? user.pass_hash : DUMMY_HASH);
   if (!user || !ok) return res.status(401).json({ error: "Wrong username or password." });
@@ -251,7 +409,7 @@ async function todayUsage(userId) {
 async function mePayload(u) {
   const plan = effectivePlan(u), use = await todayUsage(u.id);
   return {
-    user: { username: u.username }, settings: u.settings,
+    user: { username: u.username, hasPassword: u.has_password !== false }, settings: u.settings,
     plan: { id: plan, requested: u.plan_requested && u.plan_requested !== plan ? u.plan_requested : null, owner: OWNERS.has(u.username.toLowerCase()), usedTokens: use.gemini, usedClaude: use.claude },
   };
 }
@@ -283,10 +441,15 @@ app.post("/api/plan/request", requireAuth, small, wrap(async (req, res) => {
 // permanently delete the signed-in account (chats and sessions go with it via ON DELETE CASCADE)
 app.post("/api/account/delete", requireAuth, small, wrap(async (req, res) => {
   if (limited("delacct:" + req.user.id, 5, 15 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again in a few minutes." });
-  const password = req.body?.password;
-  if (typeof password !== "string" || !password) return res.status(400).json({ error: "Enter your password to confirm." });
-  const { rows } = await q("select pass_hash from users where id = $1", [req.user.id]);
-  if (!rows[0] || !(await bcrypt.compare(password.slice(0, 200), rows[0].pass_hash))) return res.status(403).json({ error: "Wrong password. Your account was not deleted." });
+  if (req.user.has_password === false) {
+    // signed up with Google: there's no password, so they type their username instead
+    if (String(req.body?.confirm || "").trim().toLowerCase() !== req.user.username.toLowerCase()) return res.status(403).json({ error: "That isn't your username. Your account was not deleted." });
+  } else {
+    const password = req.body?.password;
+    if (typeof password !== "string" || !password) return res.status(400).json({ error: "Enter your password to confirm." });
+    const { rows } = await q("select pass_hash from users where id = $1", [req.user.id]);
+    if (!rows[0] || !(await bcrypt.compare(password.slice(0, 200), rows[0].pass_hash))) return res.status(403).json({ error: "Wrong password. Your account was not deleted." });
+  }
   await q("delete from users where id = $1", [req.user.id]);
   res.clearCookie(COOKIE, { path: "/" });
   console.log("account deleted:", req.user.username);
