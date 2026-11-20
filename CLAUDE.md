@@ -36,3 +36,4 @@
 - Strength 100-2000 = `levelParams()` / `chooseMove()` in `public/chessbot.js` (search depth + candidate noise + random moves, tuned by playing the levels against each other so steps are about 150-300 apart). Re-tune by editing the DEPTH / TEMP / RANDOM tables and re-running matches.
 - Engine: Stockfish.js 10 (GPLv3) in `public/engine/` (keep `COPYING.txt` and `NOTICE.txt`), run in a Web Worker. Rules: chess.js 0.10.3 from cdnjs.
 - The opponent's chat lines come from `POST /api/chess/talk` (Gemini 3.5 Flash-Lite, counted in the user's Gemini tokens; silent when the Free limit is used up).
+- Sounds: `public/chesssound.js` makes them with the Web Audio API (no audio files, nothing copied from chess.com). Move / capture / castle / check / start / win / lose / draw; the speaker button in the panel header mutes them (saved in localStorage `neon-chess-sound`).

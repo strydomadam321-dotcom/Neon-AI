@@ -3,7 +3,7 @@
 // The game's state lives in the chat message (m.chess), so it comes back when you reopen the chat.
 (function () {
   "use strict";
-  const Bot = window.NeonChessBot;
+  const Bot = window.NeonChessBot, SND = window.NeonChessSound || { play() {}, enabled: () => false, setEnabled() {} };
   const FILES = "abcdefgh", GLYPH = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" }, VS = "︎";
   const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9 };
   const PRESETS = [
@@ -61,6 +61,7 @@
       <div class="art-head">
         <span class="art-title"><i class="art-badge" style="--c:#3dffa8">Chess</i><b class="ch-title"></b></span>
         <div class="art-acts">
+          <button type="button" class="art-btn ico" data-a="snd" title="Sound on">${icon("sound")}</button>
           <button type="button" class="art-btn ico" data-a="fs" title="Fullscreen">${icon("expand")}</button>
           <button type="button" class="art-btn ico" data-a="x" title="Close">${icon("x")}</button>
         </div>
@@ -156,6 +157,8 @@
     }
 
     // ---------- text around the board ----------
+    // check beats castling beats capture beats a plain move
+    function moveSound(mv) { return game.in_check() ? "check" : mv.flags.includes("k") || mv.flags.includes("q") ? "castle" : mv.captured ? "capture" : "move"; }
     function sanList() { return game ? game.history() : []; }
     function renderMoves() {
       const h = sanList(); let out = "";
@@ -238,6 +241,7 @@
     }
     function finish() {
       st.over = true; sel = null; targets = new Map(); highlight(); persist(); refreshAll();
+      setTimeout(() => SND.play(/You win/.test(st.result) ? "win" : /^Draw/.test(st.result) ? "draw" : "lose"), 380);
       const o = $(".ch-over"); o.innerHTML = `<div class="ch-overcard"><b></b><button type="button" class="btn primary small">Play again</button></div>`; o.querySelector("b").textContent = st.result;
       o.querySelector("button").onclick = () => { o.classList.add("hidden"); setupWrap.classList.add("open"); el.scrollIntoView({ block: "nearest", behavior: "smooth" }); };
       o.classList.remove("hidden");
@@ -268,7 +272,7 @@
     function humanMove(from, to, promotion) {
       const mv = game.move({ from, to, promotion });
       if (!mv) return;
-      clearSel(); animate(mv); highlight(); persist();
+      clearSel(); animate(mv); highlight(); persist(); SND.play(moveSound(mv));
       const flags = { capture: !!mv.captured, check: game.in_check() };
       renderMoves(); captured();
       if (over()) return;
@@ -291,7 +295,7 @@
         await sleep(Math.max(0, 450 + Math.random() * 650 - (Date.now() - t0)));       // a person doesn't answer instantly
         if (!alive() || gen !== myGen || st.over || game.turn() === st.humanColor) return;
         const mv = game.move({ from: pick.slice(0, 2), to: pick.slice(2, 4), promotion: pick[4] }) || game.move(game.moves({ verbose: true })[0]);
-        animate(mv); highlight(); renderMoves(); captured();
+        animate(mv); highlight(); renderMoves(); captured(); SND.play(moveSound(mv));
         // was the player's last move a mistake (or a great one)? Only used to decide when the bot reacts.
         const flags = { capture: !!(prior && prior.capture) || !!mv.captured, check: game.in_check() || !!(prior && prior.check) };
         if (bestCp != null && st.lastEval != null && st.elo >= 500) { const delta = bestCp - st.lastEval; if (delta >= 300) flags.blunder = true; else if (delta <= -300) flags.great = true; }
@@ -311,7 +315,7 @@
       game = new Chess(); st.started = true; st.over = false; st.result = ""; st.lastEval = null; st.log = []; logEl.innerHTML = "";
       $(".ch-over").classList.add("hidden"); $(".ch-promo").classList.add("hidden");
       sel = null; targets = new Map(); flipped = false; drawBoard(); drawPieces(); persist(); refreshAll();
-      setupWrap.classList.remove("open");
+      setupWrap.classList.remove("open"); SND.play("start");
       say("start");
       if (game.turn() !== st.humanColor) botTurn();
     }
@@ -351,6 +355,10 @@
       if (!st.started) { toast("Press Play first."); return; }
       addLog("you", t); say("user_message", { text: t });
     };
+    const snd = $('[data-a="snd"]');
+    const showSnd = () => { const on = SND.enabled(); snd.innerHTML = icon(on ? "sound" : "mute"); snd.title = on ? "Sound on" : "Sound off"; snd.classList.toggle("off", !on); };
+    snd.onclick = () => { SND.setEnabled(!SND.enabled()); showSnd(); SND.play("move"); };
+    showSnd();
     // fullscreen + close, same behaviour as the code panels
     const setFs = (on) => { const b = $('[data-a="fs"]'); b.innerHTML = icon(on ? "shrink" : "expand"); b.title = on ? "Exit fullscreen" : "Fullscreen"; };
     el.addEventListener("fullscreenchange", () => { const on = document.fullscreenElement === el; el.classList.toggle("is-fs", on); setFs(on); });
