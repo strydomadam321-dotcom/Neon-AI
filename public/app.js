@@ -667,6 +667,18 @@ function attachmentsView(atts) {
   return wrap;
 }
 
+// resend from the failed reply: drop it and everything after it, clear the other warnings, and ask again with the model now selected
+function retryFrom(m, chat) {
+  const i = chat.messages.indexOf(m);
+  if (i < 0) return false;
+  chat.messages.splice(i);
+  chat.messages = chat.messages.filter((x) => !(x.role === "assistant" && x.err && !x.text));
+  while (chat.messages.length && chat.messages.at(-1).role === "assistant") chat.messages.pop();
+  if (!chat.messages.length) return false;
+  chat.model = els.model.value;
+  renderMessages(); streamReply(); persist(chat);
+  return true;
+}
 function errBlock(text, m, chat) {
   const e = document.createElement("div");
   e.className = "msg-err";
@@ -678,8 +690,10 @@ function errBlock(text, m, chat) {
     span.textContent = text + " Try Gemini 3.5 Flash-Lite instead, it's the most reliable.";
     const b = document.createElement("button"); b.type = "button"; b.className = "err-switch"; b.textContent = "Switch to 3.5 Flash-Lite";
     b.onclick = () => {
+      if (busy) { toast("Wait for the current reply to finish."); return; }
       els.model.value = "gemini-3.5-flash-lite"; syncModelUI(); els.model.onchange();
-      b.textContent = "Switched"; b.disabled = true; toast("Switched to Gemini 3.5 Flash-Lite. Send your message again.");
+      if (chat && chat === current && retryFrom(m, chat)) toast("Switched to Gemini 3.5 Flash-Lite and resent your message.");
+      else toast("Switched to Gemini 3.5 Flash-Lite. Send your message again.");
     };
     e.querySelector(".err-body").appendChild(b);
   }
