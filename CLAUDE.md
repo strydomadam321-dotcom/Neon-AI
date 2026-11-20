@@ -37,3 +37,10 @@
 - Engine: Stockfish.js 10 (GPLv3) in `public/engine/` (keep `COPYING.txt` and `NOTICE.txt`), run in a Web Worker. Rules: chess.js 0.10.3 from cdnjs.
 - The opponent's chat lines come from `POST /api/chess/talk` (Gemini 3.5 Flash-Lite, counted in the user's Gemini tokens; silent when the Free limit is used up).
 - Sounds: `public/chesssound.js` makes them with the Web Audio API (no audio files, nothing copied from chess.com). Move / capture / castle / check / start / win / lose / draw; the speaker button in the panel header mutes them (saved in localStorage `neon-chess-sound`).
+
+## /larp (trading practice game)
+- Typing `/larp` adds an assistant message with `m.larp` state; `public/larp.js` renders the card (canvas candlestick chart, replay controls, orders, XP/levels/achievements, debrief) and saves everything in that state.
+- `public/larpengine.js` (UMD, testable in Node) is the simulation: seeded price generator (`trend/range/runner/breakdown/vshape`, same seed = same day), indicators, `Account` (market/limit/stop orders, no leverage, OCO exits), `score()` for mistakes, achievements, XP. Prices are synthetic and the money is fake; keep the "simulation, not financial advice" wording.
+- The tutorial (`TUT` in larp.js) has gated tasks, quizzes and a Skip button; `ev` flags and `moved` drive the task checks. Add lessons there.
+- `POST /api/larp/ai` (server.js, Gemini 3.5 Flash-Lite, counted in the user's Gemini tokens): `scenario` (ticker/company/headline/alert JSON), `coach` (debrief), `ask` (coach chat). The client falls back to local text when it is unavailable or limited.
+- Sounds live in `public/chesssound.js` (fill / cash / loss / alert / level) and share the mute key.

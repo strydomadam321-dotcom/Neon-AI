@@ -795,6 +795,12 @@ function msgEl(m, idx, chat = current) {
     row.append(av, body);
     return row;
   }
+  if (m.larp) {                                             // a /larp trading practice: the card is the whole message
+    row.classList.add("chessmsg", "larpmsg");
+    body.appendChild(NeonLarpGame.card(m, { icon, api, toast, me: () => user, save: () => saveChessSoon(chat) }));
+    row.append(av, body);
+    return row;
+  }
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   if (m.role === "user") {
@@ -988,19 +994,31 @@ function startChess(args) {
   ls.set("neon-last-" + user.username, chat.id);
   persist(chat);
 }
-const slashEl = $("slashHint");
+function startLarp() {
+  const chat = current; if (!chat) return;
+  chat.messages.push({ role: "assistant", text: "", larp: NeonLarpGame.defaults() });
+  if (chat.messages.length === 1) chat.title = "Trading practice";
+  chat.model = els.model.value;
+  els.input.value = ""; autoGrow(); hideSlash();
+  renderMessages(); scrollDown(true);
+  ls.set("neon-last-" + user.username, chat.id);
+  persist(chat);
+}
+const slashEl = $("slashHint"), SLASH_CMDS = ["/chess", "/larp"];
 function showSlash() {
-  const v = els.input.value.trim().toLowerCase(), on = v.startsWith("/") && !v.includes(" ") && "/chess".startsWith(v);
+  const v = els.input.value.trim().toLowerCase(), on = v.startsWith("/") && !v.includes(" ") && SLASH_CMDS.some((c) => c.startsWith(v));
+  if (on) slashEl.querySelectorAll("button").forEach((b) => (b.hidden = !b.dataset.cmd.startsWith(v)));
   if (on && slashEl.hidden) { slashEl.hidden = false; slashEl.classList.remove("out"); }
   else if (!on && !slashEl.hidden) hideSlash();
 }
 function hideSlash() { if (slashEl.hidden) return; slashEl.classList.add("out"); setTimeout(() => { slashEl.hidden = true; slashEl.classList.remove("out"); }, 200); }
-slashEl.querySelector("button").onclick = () => { startChess(""); els.input.focus(); };
+slashEl.querySelectorAll("button").forEach((b) => (b.onclick = () => { if (b.dataset.cmd === "/larp") startLarp(); else startChess(""); els.input.focus(); }));
 
 async function sendMessage(textOverride) {
   if (busy) { abortCtl?.abort(); return; }
   let text = (textOverride ?? els.input.value).trim();
   if (/^\/c[a-z]*(\s|$)/i.test(text) && "/chess".startsWith(text.split(/\s/)[0].toLowerCase()) && !pending.length) { startChess(text.slice(text.split(/\s/)[0].length)); return; }   // "/chess", "/chess 1200", "/ch"
+  if (/^\/l[a-z]*(\s|$)/i.test(text) && "/larp".startsWith(text.split(/\s/)[0].toLowerCase()) && !pending.length) { startLarp(); return; }   // "/larp", "/l"
   if (!text && !pending.length) return;
   if (config.hasKey === false) toast("The server has no Anthropic API key yet.", "err");
   const chat = current;

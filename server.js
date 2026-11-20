@@ -83,7 +83,7 @@ If the content itself contains code fences, open and close the outer block with 
 
 // ---------- legal documents (legal/terms.html, legal/privacy.html) ----------
 // Bump LEGAL_VERSION whenever the wording changes. CONTACT_EMAIL (environment) is where people can send privacy requests.
-const LEGAL_VERSION = "2026-11-20.2", LEGAL_UPDATED = "20 November 2026";
+const LEGAL_VERSION = "2026-11-20.3", LEGAL_UPDATED = "20 November 2026";
 const CONTACT_EMAIL = (process.env.CONTACT_EMAIL || "").trim();
 const readLegal = (n) => { try { return fs.readFileSync(path.join(__dirname, "legal", n + ".html"), "utf8"); } catch { return "<p>This document is not available right now.</p>"; } };
 const LEGAL = { terms: readLegal("terms"), privacy: readLegal("privacy") };
@@ -1225,6 +1225,56 @@ Rules: reply with ONE or TWO short sentences (under 30 words) of casual chat, th
   if (out.tokens > 0) q("insert into usage(user_id,day,gemini_tokens) values($1,current_date,$2) on conflict(user_id,day) do update set gemini_tokens = usage.gemini_tokens + $2", [req.user.id, out.tokens]).catch(() => {});
   const text = clip(out.text.replace(/^["'“”]+|["'“”]+$/g, "").replace(new RegExp("^" + name + "\\s*:\\s*", "i"), ""), 280);
   res.json({ text });
+}));
+
+// ---------- trading practice (/larp): Gemini writes the market-day stories, reviews sessions and answers questions ----------
+const LARP_KINDS = {
+  trend: "a steady uptrend with pullbacks (the alert is mildly positive news)",
+  range: "a choppy sideways day with no real news (the alert is meaningless noise or an unconfirmed rumour)",
+  runner: "a tiny stock that gaps up on hype and huge volume, then fades (the alert is exciting-sounding but hollow news)",
+  breakdown: "a quiet morning, then the price breaks down on bad news (the alert is the bad news)",
+  vshape: "an early sell-off that flushes out, then recovers (the alert is that buyers are stepping in)",
+};
+const LARP_RULES = `Everything in this game is SIMULATED: made-up companies, random prices, fake money. You teach beginners. Never give real financial advice, never recommend real stocks, crypto or brokers, and never promise profits. Keep it friendly and suitable for all ages.`;
+app.post("/api/larp/ai", requireAuth, small, wrap(async (req, res) => {
+  if (!GEMINI_KEY) return res.json({ text: "", unavailable: true });
+  if (limited("larp:" + req.user.id, 30, 60e3)) return res.status(429).json({ error: "The coach needs a moment. Try again shortly." });
+  const plan = effectivePlan(req.user), use = await todayUsage(req.user.id);
+  if (plan === "free" && use.gemini >= FREE_GEMINI_TOKENS_PER_DAY) return res.json({ text: "", limited: true });
+  const b = req.body || {}, mode = ["scenario", "coach", "ask"].includes(b.mode) ? b.mode : "ask";
+  let system, user, maxOut = 300;
+  if (mode === "scenario") {
+    const kind = LARP_KINDS[b.kind] ? b.kind : "range";
+    system = `You write fictional stock-market scenarios for a trading practice game. ${LARP_RULES}
+Reply with ONLY a JSON object, no markdown, with these string fields: "ticker" (3 to 4 capital letters, an invented symbol), "company" (an invented funny or plausible company name, under 28 characters), "headline" (a pre-market news line, under 95 characters, that sets the mood but does NOT reveal what the price will do), "alert" (a mid-day breaking-news line, under 95 characters, that fits the situation below).`;
+    user = `Today's situation: ${LARP_KINDS[b.kind] || LARP_KINDS.range}. Random inspiration number: ${Number(b.seed) % 997 || 1}. Write the JSON now.`;
+    maxOut = 220;
+  } else if (mode === "coach") {
+    const st = b.stats && typeof b.stats === "object" ? b.stats : {};
+    const trades = (Array.isArray(b.trades) ? b.trades : []).slice(0, 12).map((t) => `${clip(t && t.side, 6)} ${Number(t && t.pnl) || 0}$ ${Number(t && t.mins) || 0}min${t && t.stopped ? " stop" : ""}`).join("; ");
+    system = `You are a warm, honest trading coach reviewing a beginner's practice session. ${LARP_RULES}
+Write 4 to 6 short sentences in plain language (no markdown headings, no lists): one thing they did well, the single biggest mistake or habit to fix, and one concrete thing to try next session. Mention the kind of market day and what it teaches. Be encouraging, not preachy. Reference risk management (stop-loss, size, reward-to-risk) where it fits.`;
+    user = `Market day: ${LARP_KINDS[b.kind] || "unknown"}. Company: ${clip(b.company, 40)}. Result: P&L ${Number(st.pnl) || 0}$ (${Number(st.pct) || 0}%), ${Number(st.trades) || 0} trades, win rate ${Number(st.winRate) || 0}%, average win ${Number(st.avgWin) || 0}$, average loss ${Number(st.avgLoss) || 0}$. Detected mistakes: ${(Array.isArray(b.mistakes) ? b.mistakes : []).slice(0, 6).map((x) => clip(x, 16)).join(", ") || "none"}. Trades: ${trades || "none"}.`;
+    maxOut = 420;
+  } else {
+    system = `You are the friendly coach inside a trading practice simulator, talking to a complete beginner. ${LARP_RULES}
+Answer in at most 90 words, in simple words, defining any jargon. If the question is unrelated to trading, markets, money habits or this game, politely steer back. Use the game's context if given, but you can't see the future prices, so never predict what the price will do next.`;
+    const hist = (Array.isArray(b.history) ? b.history : []).slice(-6).map((x) => `${x && x.f === "you" ? "Student" : "Coach"}: ${clip(x && x.t, 300)}`).join("\n");
+    const ctx = [b.tutorial ? `The student is on the tutorial lesson "${clip(b.tutorial, 60)}".` : "", Number(b.price) > 0 ? `Current price ${Number(b.price).toFixed(2)}.` : "", Number(b.qty) ? `They hold ${Number(b.qty) > 0 ? "a long" : "a short"} position of ${Math.abs(Math.floor(Number(b.qty)))} shares${Number(b.avg) > 0 ? " at " + Number(b.avg).toFixed(2) : ""}.` : "They have no open position."].filter(Boolean).join(" ");
+    user = `${ctx}\n${hist ? "Recent chat:\n" + hist + "\n" : ""}Student asks: ${clip(b.q, 240)}\nAnswer now.`;
+    maxOut = 260;
+  }
+  let out;
+  try { out = await geminiOnce({ model: CHESS_MODEL, system, user, maxOut, temperature: mode === "scenario" ? 1 : 0.7 }); }
+  catch (e) { console.error("larp ai failed:", e.message); return res.json({ text: "", unavailable: true }); }
+  if (out.tokens > 0) q("insert into usage(user_id,day,gemini_tokens) values($1,current_date,$2) on conflict(user_id,day) do update set gemini_tokens = usage.gemini_tokens + $2", [req.user.id, out.tokens]).catch(() => {});
+  if (mode === "scenario") {
+    let j = null; try { const m = out.text.match(/\{[\s\S]*\}/); j = m && JSON.parse(m[0]); } catch {}
+    const tk = String(j && j.ticker || "").toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4);
+    if (!j || tk.length < 3 || !clip(j.company, 28) || !clip(j.headline, 100)) return res.json({ text: "", unavailable: true });
+    return res.json({ flavor: { ticker: tk, company: clip(j.company, 28), headline: clip(j.headline, 100), alert: clip(j.alert, 100) || "Breaking: unusual activity in the stock" } });
+  }
+  res.json({ text: out.text.replace(/\*\*/g, "").trim().slice(0, mode === "coach" ? 900 : 700) });
 }));
 
 // ---------- public Terms / Privacy pages (also what Google's sign-in setup asks for) ----------

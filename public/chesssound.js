@@ -56,6 +56,12 @@
     win: (c, o, t) => { [523.25, 659.25, 783.99].forEach((f, i) => note(c, o, t + i * 0.12, f, 0.45, 0.22)); note(c, o, t + 0.36, 1046.5, 0.55, 0.16); },
     lose: (c, o, t) => { [392, 311.13].forEach((f, i) => note(c, o, t + i * 0.18, f, 0.55, 0.22)); },
     draw: (c, o, t) => { [440, 440].forEach((f, i) => note(c, o, t + i * 0.16, f, 0.4, 0.2)); },
+    // trading sim (/larp)
+    fill: (c, o, t) => { tok(c, o, t, { pitch: 1.5, vol: 0.55, body: 260, bright: 3000, decay: 0.045, tick: 0.02 }); },
+    cash: (c, o, t) => { note(c, o, t, 1318.5, 0.16, 0.16, "triangle"); note(c, o, t + 0.07, 1760, 0.3, 0.14, "triangle"); },
+    loss: (c, o, t) => { note(c, o, t, 330, 0.22, 0.17, "sawtooth"); note(c, o, t + 0.1, 247, 0.3, 0.15, "sawtooth"); },
+    alert: (c, o, t) => { [880, 660, 880].forEach((f, i) => note(c, o, t + i * 0.11, f, 0.16, 0.14, "square")); },
+    level: (c, o, t) => { [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => note(c, o, t + i * 0.09, f, 0.4, 0.17)); },
   };
 
   function play(kind) {
