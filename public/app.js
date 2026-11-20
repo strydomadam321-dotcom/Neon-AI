@@ -82,37 +82,67 @@ async function api(path, opts = {}) {
 // ---------- auth screen ----------
 let mode = "login";
 let step = 1;
-function syncStep() {
-  authEls.btn.querySelector(".lbl").textContent = mode === "login" ? "Sign in" : step === 1 ? "Next" : "Create account";
+const SPRING = "cubic-bezier(.3, 1.25, .4, 1)";
+// liquid-glass squish of the whole card whenever its shape changes
+function squish() {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  $("authCard").animate([
+    { transform: "scale(1)" }, { transform: "scale(1.022, .978)", offset: .3 }, { transform: "scale(.992, 1.012)", offset: .62 }, { transform: "scale(1)" },
+  ], { duration: 760, easing: "ease-in-out" });
+}
+let lblTxt = "";
+function syncStep(animate) {
+  const lbl = authEls.btn.querySelector(".lbl"), t = mode === "login" ? "Sign in" : step === 1 ? "Next" : "Create account";
+  if (t !== lblTxt) {
+    if (animate && lblTxt) {
+      const out = lbl.animate([{ opacity: 1, filter: "blur(0)", transform: "translateY(0)" }, { opacity: 0, filter: "blur(4px)", transform: "translateY(-6px)" }], { duration: 140, fill: "forwards" });
+      out.onfinish = () => {
+        lbl.textContent = t; out.cancel();
+        lbl.animate([{ opacity: 0, filter: "blur(4px)", transform: "translateY(6px)" }, { opacity: 1, filter: "blur(0)", transform: "translateY(0)" }], { duration: 260, easing: "cubic-bezier(.2,.9,.25,1)" });
+      };
+    } else lbl.textContent = t;
+    lblTxt = t;
+  }
   document.querySelectorAll("#stepper i").forEach((d, i) => d.classList.toggle("on", i < step));
   $("stepTxt").textContent = `Step ${step} of 2`;
 }
-function goStep(n) {
+// slide between the two signup steps while the box stretches or shrinks to the new content
+function goStep(n, instant) {
   if (n === step) return;
-  const fwd = n > step, from = $("step" + step), to = $("step" + n);
-  step = n; syncStep(); authEls.err.textContent = "";
+  const fwd = n > step, from = $("step" + step), to = $("step" + n), wrap = $("steps");
+  step = n; syncStep(!instant); authEls.err.textContent = "";
+  if (instant) { from.hidden = true; from.className = "step"; to.hidden = false; to.className = "step"; return; }
+  const h0 = wrap.offsetHeight;
+  wrap.style.height = h0 + "px"; wrap.classList.add("morphing");
   from.className = "step " + (fwd ? "out-fwd" : "out-back");
+  squish();
   setTimeout(() => {
     from.hidden = true; from.className = "step";
     to.hidden = false; to.className = "step " + (fwd ? "in-fwd" : "in-back");
+    wrap.style.height = "auto"; const h1 = wrap.offsetHeight;
+    wrap.style.height = h1 + "px";
+    const an = wrap.animate([{ height: h0 + "px" }, { height: h1 + "px" }], { duration: 700, easing: SPRING });
+    an.onfinish = an.oncancel = () => { wrap.style.height = ""; wrap.classList.remove("morphing"); };
     (n === 2 ? $("email") : authEls.user).focus({ preventScroll: true });
-  }, 250);
+  }, 230);
 }
 $("backBtn").onclick = () => goStep(1);
 const authEls = { form: $("authForm"), user: $("username"), pass: $("password"), err: $("authErr"), btn: $("authSubmit") };
 
-function setMode(m) {
+function setMode(m, instant) {
+  const changed = m !== mode;
   mode = m;
   document.querySelector(".tabs").dataset.mode = m;
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.mode === m));
   authEls.pass.autocomplete = m === "login" ? "current-password" : "new-password";
-  $("strength").hidden = m !== "signup";
-  step = 1; $("step1").hidden = false; $("step2").hidden = true; $("step1").className = "step"; $("step2").className = "step";
-  $("stepper").hidden = m !== "signup"; syncStep();
+  $("strengthC").classList.toggle("open", m === "signup");
+  $("stepperC").classList.toggle("open", m === "signup");
+  if (step !== 1) goStep(1, instant); else syncStep(!instant);
+  if (!instant && changed) squish();
   authEls.err.textContent = "";
   document.querySelectorAll(".field.bad").forEach((f) => f.classList.remove("bad"));
 }
-document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => setMode(t.dataset.mode)));
+document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => { if (t.dataset.mode !== mode) setMode(t.dataset.mode); }));
 
 $("googleBtn").onclick = () => toast("Google sign-up is coming soon.");
 $("togglePw").onclick = () => {
@@ -181,7 +211,7 @@ function showAuth(msg = "") {
   $("app").classList.add("hidden");
   document.body.classList.remove("in-app");
   $("auth").classList.remove("hidden");
-  setMode("login");
+  setMode("login", true);
   authEls.err.textContent = msg;
   authEls.user.focus();
 }
