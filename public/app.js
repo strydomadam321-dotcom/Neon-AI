@@ -789,6 +789,12 @@ function msgEl(m, idx, chat = current) {
   if (m.role === "user") paintAvatar(av, user?.username || "U", user?.picture); else av.innerHTML = icon("bolt");
   const body = document.createElement("div");
   body.className = "body";
+  if (m.chess) {                                            // a /chess game: the board is the whole message
+    row.classList.add("chessmsg");
+    body.appendChild(NeonChess.card(m, { icon, api, toast, me: () => user, paint: paintAvatar, save: () => saveChessSoon(chat) }));
+    row.append(av, body);
+    return row;
+  }
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   if (m.role === "user") {
@@ -966,9 +972,35 @@ async function autoTitle(chat) {
   } catch {}
 }
 
+// ---------- slash commands (/chess) ----------
+let chessSaveT = 0;
+function saveChessSoon(chat) { clearTimeout(chessSaveT); chessSaveT = setTimeout(() => { if (user) persist(chat); }, 700); }
+function startChess(args) {
+  const chat = current; if (!chat) return;
+  const o = {}, n = String(args || "").match(/\b(\d{3,4})\b/);
+  if (n) o.elo = Math.max(100, Math.min(2000, Number(n[1])));
+  if (/\bwhite\b/i.test(args)) o.color = "w"; else if (/\bblack\b/i.test(args)) o.color = "b";
+  chat.messages.push({ role: "assistant", text: "", chess: NeonChess.defaults(o) });
+  if (chat.messages.length === 1) chat.title = "Chess game";
+  chat.model = els.model.value;
+  els.input.value = ""; autoGrow(); hideSlash();
+  renderMessages(); scrollDown(true);
+  ls.set("neon-last-" + user.username, chat.id);
+  persist(chat);
+}
+const slashEl = $("slashHint");
+function showSlash() {
+  const v = els.input.value.trim().toLowerCase(), on = v.startsWith("/") && !v.includes(" ") && "/chess".startsWith(v);
+  if (on && slashEl.hidden) { slashEl.hidden = false; slashEl.classList.remove("out"); }
+  else if (!on && !slashEl.hidden) hideSlash();
+}
+function hideSlash() { if (slashEl.hidden) return; slashEl.classList.add("out"); setTimeout(() => { slashEl.hidden = true; slashEl.classList.remove("out"); }, 200); }
+slashEl.querySelector("button").onclick = () => { startChess(""); els.input.focus(); };
+
 async function sendMessage(textOverride) {
   if (busy) { abortCtl?.abort(); return; }
-  const text = (textOverride ?? els.input.value).trim();
+  let text = (textOverride ?? els.input.value).trim();
+  if (/^\/c[a-z]*(\s|$)/i.test(text) && "/chess".startsWith(text.split(/\s/)[0].toLowerCase()) && !pending.length) { startChess(text.slice(text.split(/\s/)[0].length)); return; }   // "/chess", "/chess 1200", "/ch"
   if (!text && !pending.length) return;
   if (config.hasKey === false) toast("The server has no Anthropic API key yet.", "err");
   const chat = current;
@@ -1216,9 +1248,10 @@ function openSide() { els.sidebar.classList.add("open"); els.scrim.classList.add
 function closeSide() { els.sidebar.classList.remove("open"); els.scrim.classList.remove("show"); }
 
 els.send.onclick = () => sendMessage();
-els.input.addEventListener("input", autoGrow);
+els.input.addEventListener("input", () => { autoGrow(); showSlash(); });
 els.input.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
+  if (e.key === "Escape" && !slashEl.hidden) { e.stopPropagation(); hideSlash(); return; }
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (els.input.value.trim() === "/") return; sendMessage(); }
 });
 els.input.addEventListener("paste", (e) => {
   const files = [...(e.clipboardData?.files || [])];

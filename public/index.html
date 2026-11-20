@@ -304,6 +304,7 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
 
     <div class="composer-wrap">
       <div id="attachments" class="attachments"></div>
+      <div id="slashHint" class="slash-hint" hidden><button type="button" data-cmd="/chess"><b>/chess</b><span>Play chess against a bot you choose, 100 to 2000</span></button></div>
       <div class="composer" id="composer">
         <button id="attachBtn" class="icon" aria-label="Attach files" title="Attach files"><svg class="ic"><use href="#i-clip"/></svg></button>
         <input id="fileInput" type="file" multiple hidden accept="image/*,.pdf,.docx,.pptx,.doc,.ppt,.txt,.md,.csv,.json,.js,.ts,.jsx,.tsx,.py,.html,.css,.java,.c,.cpp,.cs,.go,.rs,.rb,.php,.sh,.sql,.yml,.yaml,.xml,.log,.toml,.ini">
@@ -456,6 +457,8 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="/fx.js"></script>
 <script src="/files.js"></script>
+<script src="/chessbot.js"></script>
+<script src="/chessgame.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

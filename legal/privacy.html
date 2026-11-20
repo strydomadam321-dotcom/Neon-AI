@@ -23,6 +23,7 @@
   <li><b>Email address.</b> You enter it when signing up, or we receive it from Google if you use "Continue with Google".</li>
   <li><b>Password.</b> Only if you choose one. We never store it as typed. We store a one-way scrambled version (a bcrypt hash) that we cannot turn back into your password.</li>
   <li><b>Your chats.</b> Everything you type, the AI's replies, chat titles, and any files or images you attach (including the text we read from Word, PowerPoint, PDF and text files). Chats are stored so they sync between your devices.</li>
+  <li><b>Chess games.</b> If you use the /chess command, the game (moves, settings and the chat with your opponent) is saved inside that chat. The chess engine (Stockfish) runs in your own browser, so your moves are not sent to it over the internet.</li>
   <li><b>Settings.</b> Your custom instructions, chosen model and effort level, and display options (such as retro mode).</li>
   <li><b>Plan choice.</b> Which plan you picked in the plans pop-up. No payment is taken at the moment.</li>
 </ul>
@@ -70,6 +71,7 @@
   <li><b>Resend</b> (email delivery, United States). Receives your email address and the one-time code so it can deliver our emails to you.</li>
   <li><b>Google</b> (sign-in, United States and other countries). If you use "Continue with Google", Google tells us your email, ID and profile picture, and learns that you signed in to NEON AI.</li>
   <li><b>Google Gemini</b> (AI model). If you use a Gemini model, the conversation (your messages, instructions and attachments) is sent to Google to produce the reply. <b>We use Google's free Gemini API tier. Under Google's terms for free-tier use, content you send may be used by Google to improve its products, and human reviewers may read it. Do not send private or sensitive information to Gemini models.</b></li>
+  <li><b>Google Gemini in chess.</b> In a /chess game, the opponent's chat messages are written by Gemini 3.5 Flash-Lite. For each message, Google receives the recent moves, the opponent's name and personality text you chose, your recent chat messages with the opponent, and the free-tier notice above applies.</li>
   <li><b>Anthropic Claude</b> (AI model). If you use a Claude model, the conversation is sent to Anthropic to produce the reply. Under Anthropic's current terms for its business API, it does not train its models on this data by default, but it may keep it for a limited time.</li>
   <li><b>Public code and font libraries.</b> Your browser loads some open-source libraries and fonts from public networks (cdnjs / Cloudflare, jsDelivr, Google Fonts). Like any website, those networks can see your IP address when your browser fetches the files. Libraries for making PDF, Word, PowerPoint and Excel files are loaded the first time you use them.</li>
 </ul>

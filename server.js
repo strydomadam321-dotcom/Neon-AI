@@ -83,7 +83,7 @@ If the content itself contains code fences, open and close the outer block with 
 
 // ---------- legal documents (legal/terms.html, legal/privacy.html) ----------
 // Bump LEGAL_VERSION whenever the wording changes. CONTACT_EMAIL (environment) is where people can send privacy requests.
-const LEGAL_VERSION = "2026-11-20", LEGAL_UPDATED = "20 November 2026";
+const LEGAL_VERSION = "2026-11-20.2", LEGAL_UPDATED = "20 November 2026";
 const CONTACT_EMAIL = (process.env.CONTACT_EMAIL || "").trim();
 const readLegal = (n) => { try { return fs.readFileSync(path.join(__dirname, "legal", n + ".html"), "utf8"); } catch { return "<p>This document is not available right now.</p>"; } };
 const LEGAL = { terms: readLegal("terms"), privacy: readLegal("privacy") };
@@ -1173,6 +1173,59 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
   res.end();
 });
 
+
+// ---------- chess bot chat (/chess): Gemini plays a "person" in the chat beside the board ----------
+const CHESS_MODEL = process.env.CHESS_MODEL || "gemini-3.5-flash-lite";
+async function geminiOnce({ model, system, user, maxOut = 256, temperature = 0.95 }) {
+  const gc = { maxOutputTokens: maxOut, temperature }, th = geminiThinking(model, 0);
+  const call = async (withTh) => {
+    const r = await fetch(`${GEMINI_BASE}/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: "POST", signal: AbortSignal.timeout(25000),
+      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: user }] }], generationConfig: withTh && th ? { ...gc, thinkingConfig: th } : gc }),
+    });
+    if (!r.ok) { let msg = ""; try { msg = (await r.json())?.error?.message || ""; } catch {} const e = new Error(`${r.status} ${msg}`.slice(0, 200)); e.status = r.status; throw e; }
+    const j = await r.json();
+    return { text: (j.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join(""), tokens: j.usageMetadata?.totalTokenCount || 0 };
+  };
+  try { return await call(true); } catch (e) { if (e.status === 400) return await call(false); throw e; }
+}
+const clip = (v, n) => String(v ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, n);
+const CHESS_EVENTS = {
+  start: "The game is just starting. Say a short hello / opening line to your opponent.",
+  user_move: "Your opponent just moved. React briefly to what happened on the board, the way you would while playing.",
+  bot_move: "You just made your move. Say something short about it or about the position.",
+  user_message: "Your opponent wrote you a message in the chat. Reply to it.",
+  game_over: "The game just ended. Say something fitting about the result.",
+};
+app.post("/api/chess/talk", requireAuth, small, wrap(async (req, res) => {
+  if (!GEMINI_KEY) return res.json({ text: "", unavailable: true });
+  if (limited("chess:" + req.user.id, 40, 60e3)) return res.status(429).json({ error: "The bot needs a moment. Try again shortly." });
+  const plan = effectivePlan(req.user), use = await todayUsage(req.user.id);
+  if (plan === "free" && use.gemini >= FREE_GEMINI_TOKENS_PER_DAY) return res.json({ text: "", limited: true });
+  const b = req.body || {}, event = CHESS_EVENTS[b.event] ? b.event : "user_message";
+  const name = clip(b.name, 24) || "Alex", elo = Math.max(100, Math.min(2000, Number(b.elo) || 1000)), persona = clip(b.personality, 400) || "A friendly, relaxed chess player.";
+  const botColor = b.botColor === "b" ? "Black" : "White";
+  const moves = (Array.isArray(b.moves) ? b.moves : []).slice(-24).map((m) => clip(m, 10)).filter(Boolean);
+  const flags = b.flags && typeof b.flags === "object" ? b.flags : {};
+  const notes = [];
+  if (flags.capture) notes.push("a piece was just captured");
+  if (flags.check) notes.push("the last move gave check");
+  if (flags.blunder) notes.push("your opponent's last move looks like a real mistake");
+  if (flags.great) notes.push("your opponent's last move was impressive");
+  if (flags.result) notes.push("result: " + clip(flags.result, 60));
+  const chatLog = (Array.isArray(b.log) ? b.log : []).slice(-8).map((x) => `${x && x.f === "you" ? "Opponent" : name}: ${clip(x && x.t, 200)}`).join("\n");
+  const system = `You are ${name}, a real person sitting across the board from the user in a game of chess, chatting while you play. Your chess strength is about ${elo} (chess.com-style rating), so talk like someone at that level: a beginner does not use engine or master-level jargon.
+Your personality: ${persona}
+Rules: reply with ONE or TWO short sentences (under 30 words) of casual chat, the way a person types, and nothing else: no quotation marks, no stage directions, no names in front. Stay in character. Light teasing is fine, but keep it friendly enough for all ages: no slurs, no cruelty, nothing sexual, no threats. Do not give the opponent move suggestions or analysis, and do not mention numbers like evaluations. Never claim you are definitely human if the user sincerely asks whether you are an AI or a bot: then say honestly, in a light way, that you are a chess bot with a personality.`;
+  const user = `You are playing ${botColor}. Recent moves: ${moves.join(" ") || "(none yet)"}.${notes.length ? "\nNotes: " + notes.join("; ") + "." : ""}${chatLog ? "\nRecent chat:\n" + chatLog : ""}\n${event === "user_message" ? `Opponent says: ${clip(b.text, 300)}\n` : ""}Situation: ${CHESS_EVENTS[event]}\nWrite your chat message now.`;
+  let out;
+  try { out = await geminiOnce({ model: CHESS_MODEL, system, user }); }
+  catch (e) { console.error("chess talk failed:", e.message); return res.json({ text: "", unavailable: true }); }
+  if (out.tokens > 0) q("insert into usage(user_id,day,gemini_tokens) values($1,current_date,$2) on conflict(user_id,day) do update set gemini_tokens = usage.gemini_tokens + $2", [req.user.id, out.tokens]).catch(() => {});
+  const text = clip(out.text.replace(/^["'“”]+|["'“”]+$/g, "").replace(new RegExp("^" + name + "\\s*:\\s*", "i"), ""), 280);
+  res.json({ text });
+}));
 
 // ---------- public Terms / Privacy pages (also what Google's sign-in setup asks for) ----------
 const legalPage = (doc) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${doc === "terms" ? "Terms of Service" : "Privacy Policy"} · NEON AI</title>

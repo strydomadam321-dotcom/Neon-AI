@@ -30,3 +30,9 @@
 - If the wording changes, bump `LEGAL_VERSION`/`LEGAL_UPDATED` in `server.js`. Keep the text true to what the app does (providers, retention, cookies).
 - Creating an account needs the consent tick (`agree`); `users.terms_version` / `terms_at` record it. Signing in with Google never creates an account.
 - `CONTACT_EMAIL` (environment) is shown in the documents for privacy requests; never put the owner's personal address in the repo.
+
+## /chess (chess game against a bot)
+- Typing `/chess` (optionally `/chess 1200 black`) adds an assistant message with `m.chess` state; `public/chessgame.js` renders it as a board card and saves moves, settings and chat in that state.
+- Strength 100-2000 = `levelParams()` / `chooseMove()` in `public/chessbot.js` (search depth + candidate noise + random moves, tuned by playing the levels against each other so steps are about 150-300 apart). Re-tune by editing the DEPTH / TEMP / RANDOM tables and re-running matches.
+- Engine: Stockfish.js 10 (GPLv3) in `public/engine/` (keep `COPYING.txt` and `NOTICE.txt`), run in a Web Worker. Rules: chess.js 0.10.3 from cdnjs.
+- The opponent's chat lines come from `POST /api/chess/talk` (Gemini 3.5 Flash-Lite, counted in the user's Gemini tokens; silent when the Free limit is used up).

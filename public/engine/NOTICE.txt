@@ -1,0 +1,8 @@
+NEON AI chess uses Stockfish.js, a WebAssembly build of the Stockfish chess engine.
+
+  Stockfish        https://stockfishchess.org/            (GNU General Public License v3 or later)
+  Stockfish.js     https://github.com/nmrugg/stockfish.js (GNU General Public License v3 or later)
+  Engine version   Stockfish.js 10 (npm package "stockfish" 10.0.2), unmodified.
+
+The full text of the GPL is in COPYING.txt in this folder. The source code for the engine is available at the addresses above.
+The rest of NEON AI talks to the engine only through its standard text (UCI) interface.
