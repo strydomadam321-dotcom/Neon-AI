@@ -434,9 +434,126 @@ const modelLocked = (id) => {
   return plan.id !== "plus" || /opus/i.test(id);
 };
 
-// ---------- markdown ----------
+// ---------- markdown + code panels (live preview, copy, download, fullscreen) ----------
 marked.setOptions({ breaks: true, gfm: true });
-function md(text) {
+
+const EXT = { html: "html", htm: "html", xhtml: "html", svg: "svg", md: "md", markdown: "md", csv: "csv", json: "json", javascript: "js", js: "js", jsx: "jsx", typescript: "ts", ts: "ts", tsx: "tsx", python: "py", py: "py", css: "css", scss: "scss",
+  java: "java", c: "c", cpp: "cpp", "c++": "cpp", csharp: "cs", cs: "cs", "c#": "cs", go: "go", rust: "rs", rs: "rs", ruby: "rb", rb: "rb", php: "php", bash: "sh", sh: "sh", shell: "sh", zsh: "sh", sql: "sql", xml: "xml",
+  yaml: "yaml", yml: "yml", kotlin: "kt", kt: "kt", swift: "swift", lua: "lua", r: "r", dart: "dart", toml: "toml", ini: "ini", dockerfile: "Dockerfile", tex: "tex", latex: "tex", txt: "txt", text: "txt" };
+const MIME = { html: "text/html", svg: "image/svg+xml", md: "text/markdown", csv: "text/csv", json: "application/json", css: "text/css", js: "text/javascript", xml: "application/xml" };
+const slug = (t) => (String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40)) || "neon-ai";
+function downloadText(name, text, ext) {
+  const blob = new Blob([text], { type: (MIME[ext] || "text/plain") + ";charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+
+// which code blocks get the full panel
+function artifactKind(lang, code) {
+  const t = code.trim();
+  if (["html", "htm", "xhtml"].includes(lang)) return /^<!doctype|^<html|^<head|^<body|<script|<style/i.test(t) || t.length > 400 ? "html" : null;
+  if (lang === "svg") return /^<svg/i.test(t) ? "svg" : null;
+  if (["md", "markdown"].includes(lang)) return t.length > 200 ? "md" : null;
+  if (lang === "csv") return t.split("\n").length >= 2 ? "csv" : null;
+  return null;
+}
+function artifactTitle(kind, code) {
+  if (kind === "html") { const m = code.match(/<title[^>]*>([^<]{1,60})<\/title>/i); return m ? m[1].trim() : "Web page"; }
+  if (kind === "svg") return "SVG image";
+  if (kind === "md") { const m = code.match(/^\s{0,3}#{1,3}\s+(.{1,60})$/m); return m ? m[1].trim() : "Document"; }
+  return "Table";
+}
+function parseCsv(text) {
+  const rows = []; let row = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") { row.push(cell); cell = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+const DOC_CSS = 'body{font:15px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1b1b2f;background:#fff;margin:0;padding:28px;max-width:860px;margin:0 auto}h1,h2,h3{line-height:1.25}pre{background:#f3f1ff;padding:12px;border-radius:8px;overflow:auto}code{background:#f3f1ff;padding:1px 5px;border-radius:5px}pre code{background:none;padding:0}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d9d4f0;padding:7px 11px;text-align:left}th{background:#f3f1ff}blockquote{border-left:3px solid #a66bff;margin:0;padding-left:14px;color:#555}img{max-width:100%}';
+const PRINT_HOOK = '<script>addEventListener("message",function(e){if(e.data==="neon-print")print()})<\/script>';   // lets the Save-as-PDF button ask this page to print itself
+function previewDoc(kind, code) {
+  if (kind === "html") return /<\/body>/i.test(code) ? code.replace(/<\/body>(?![\s\S]*<\/body>)/i, PRINT_HOOK + "</body>") : code + PRINT_HOOK;
+  if (kind === "svg") return '<!doctype html><meta charset="utf-8"><style>html,body{margin:0;height:100%}body{display:grid;place-items:center;background:#fff}svg{max-width:96%;max-height:96vh;height:auto}</style>' + code + PRINT_HOOK;
+  if (kind === "md") return '<!doctype html><meta charset="utf-8"><style>' + DOC_CSS + "</style>" + DOMPurify.sanitize(marked.parse(code)) + PRINT_HOOK;
+  const rows = parseCsv(code.trim()), esc = (x) => String(x).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])), cells = (r, t) => r.map((c) => `<${t}>${esc(c)}</${t}>`).join("");
+  return '<!doctype html><meta charset="utf-8"><style>' + DOC_CSS + "</style><table><thead><tr>" + cells(rows[0] || [], "th") + "</tr></thead><tbody>" + rows.slice(1).map((r) => "<tr>" + cells(r, "td") + "</tr>").join("") + "</tbody></table>" + PRINT_HOOK;
+}
+
+function artifactCard(code, lang, kind, live) {
+  const title = artifactTitle(kind, code), ext = EXT[lang] || kind;
+  const card = document.createElement("div");
+  card.className = "artifact" + (live ? " live" : "");
+  card.dataset.kind = kind;
+  card.innerHTML = `
+    <div class="art-head">
+      <span class="art-title">${icon("sparkle")}<b></b></span>
+      <div class="art-tabs" data-t="${live ? "code" : "preview"}"><span class="art-ink"></span><button type="button" data-t="code">Code</button><button type="button" data-t="preview"${live ? " disabled" : ""}>Preview</button></div>
+      <div class="art-acts">
+        <button type="button" class="art-btn" data-a="copy" title="Copy code">${icon("copy")}<span>Copy</span></button>
+        <button type="button" class="art-btn" data-a="dl" title="Download as .${ext}">${icon("download")}<span>Download</span></button>
+        <button type="button" class="art-btn ico" data-a="pdf" title="Save as PDF"${live ? " disabled" : ""}>${icon("printer")}</button>
+        <button type="button" class="art-btn ico" data-a="fs" title="Fullscreen">${icon("expand")}</button>
+        <button type="button" class="art-btn ico" data-a="x" title="Close">${icon("x")}</button>
+      </div>
+    </div>
+    <div class="collapse open art-wrap"><div class="collapse-in"><div class="art-body">
+      <div class="art-pane art-codepane${live ? " on" : ""}"><pre><code class="language-${lang}"></code></pre></div>
+      <div class="art-pane art-prevpane${live ? "" : " on"}"></div>
+    </div></div></div>`;
+  card.querySelector(".art-title b").textContent = live ? "Writing code…" : title;
+  const codeEl = card.querySelector("code"); codeEl.textContent = code;
+  if (window.hljs) { try { hljs.highlightElement(codeEl); } catch {} }
+  const tabs = card.querySelector(".art-tabs"), prev = card.querySelector(".art-prevpane"), codePane = card.querySelector(".art-codepane");
+  if (live) { requestAnimationFrame(() => { codePane.scrollTop = codePane.scrollHeight; }); return card; }
+
+  let frame = null;
+  const buildPreview = () => {
+    if (frame) return;
+    prev.innerHTML = '<div class="art-loading"><i></i><span>Loading preview…</span></div>';
+    frame = document.createElement("iframe");
+    frame.setAttribute("sandbox", "allow-scripts allow-forms allow-modals allow-popups allow-pointer-lock");   // no same-origin: the page can't touch your account
+    frame.referrerPolicy = "no-referrer"; frame.title = title; frame.loading = "eager";
+    frame.addEventListener("load", () => prev.querySelector(".art-loading")?.classList.add("gone"));
+    frame.srcdoc = previewDoc(kind, code);
+    prev.appendChild(frame);
+  };
+  const show = (t) => {
+    tabs.dataset.t = t; codePane.classList.toggle("on", t === "code"); prev.classList.toggle("on", t === "preview");
+    tabs.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.t === t));
+    if (t === "preview") buildPreview();
+  };
+  tabs.querySelectorAll("button").forEach((b) => (b.onclick = () => show(b.dataset.t)));
+  show("preview");
+
+  const wrap = card.querySelector(".art-wrap"), setFsIcon = (on) => { card.querySelector('[data-a="fs"]').innerHTML = icon(on ? "shrink" : "expand"); card.querySelector('[data-a="fs"]').title = on ? "Exit fullscreen" : "Fullscreen"; };
+  const flash = (btn, txt) => { const old = btn.innerHTML; btn.innerHTML = `${icon("check")}<span>${txt}</span>`; setTimeout(() => (btn.innerHTML = old), 1400); };
+  card.addEventListener("fullscreenchange", () => { const on = document.fullscreenElement === card; card.classList.toggle("is-fs", on); setFsIcon(on); });
+  card.querySelectorAll(".art-btn").forEach((btn) => (btn.onclick = () => {
+    const a = btn.dataset.a;
+    if (a === "copy") { navigator.clipboard.writeText(code); flash(btn, "Copied"); }
+    else if (a === "dl") { downloadText(slug(title) + "." + ext, code, ext); flash(btn, "Saved"); }
+    else if (a === "pdf") { show("preview"); toast("In the print window, choose Save as PDF."); setTimeout(() => frame?.contentWindow?.postMessage("neon-print", "*"), 250); }
+    else if (a === "fs") {
+      if (document.fullscreenElement === card) document.exitFullscreen();
+      else if (card.requestFullscreen) card.requestFullscreen().catch(() => { card.classList.toggle("is-fs"); setFsIcon(card.classList.contains("is-fs")); });
+      else { card.classList.toggle("is-fs"); setFsIcon(card.classList.contains("is-fs")); }                 // browsers without element fullscreen (iPhone): fill the screen instead
+    }
+    else if (a === "x") {
+      const open = !wrap.classList.contains("open"); wrap.classList.toggle("open", open); card.classList.toggle("closed", !open);
+      btn.innerHTML = icon(open ? "x" : "chev"); btn.title = open ? "Close" : "Open";
+    }
+  }));
+  return card;
+}
+
+function md(text, live = false) {
   const html = DOMPurify.sanitize(marked.parse(text || ""));
   const d = document.createElement("div");
   d.className = "md";
@@ -444,18 +561,23 @@ function md(text) {
   d.querySelectorAll("a").forEach((a) => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
   d.querySelectorAll("pre").forEach((pre) => {
     const code = pre.querySelector("code");
-    if (code && window.hljs) { try { hljs.highlightElement(code); } catch {} }
     const lang = (code?.className.match(/language-([\w+#-]+)/) || [])[1] || "code";
+    const raw = code ? code.textContent : pre.textContent;
+    const kind = artifactKind(lang.toLowerCase(), raw);
+    if (kind) { pre.replaceWith(artifactCard(raw, lang.toLowerCase(), kind, live)); return; }
+    if (code && window.hljs) { try { hljs.highlightElement(code); } catch {} }
+    const ext = EXT[lang.toLowerCase()] || "txt";
     const bar = document.createElement("div");
     bar.className = "bar";
-    bar.innerHTML = `<span></span><button class="copy" type="button">${icon("copy")}<span>Copy</span></button>`;
+    bar.innerHTML = `<span></span><span class="grp"><button class="copy dl" type="button" title="Download as .${ext}">${icon("download")}<span>Download</span></button><button class="copy cp" type="button">${icon("copy")}<span>Copy</span></button></span>`;
     bar.firstChild.textContent = lang;
-    const b = bar.querySelector("button");
+    const b = bar.querySelector(".cp"), dl = bar.querySelector(".dl");
     b.onclick = () => {
-      navigator.clipboard.writeText(code ? code.innerText : pre.innerText);
+      navigator.clipboard.writeText(raw);
       b.innerHTML = `${icon("check")}<span>Copied</span>`;
       setTimeout(() => (b.innerHTML = `${icon("copy")}<span>Copy</span>`), 1400);
     };
+    dl.onclick = () => { downloadText((lang === "code" ? "code" : slug(lang)) + "." + ext, raw, ext); dl.innerHTML = `${icon("check")}<span>Saved</span>`; setTimeout(() => (dl.innerHTML = `${icon("download")}<span>Download</span>`), 1400); };
     pre.appendChild(bar);
   });
   return d;
@@ -550,9 +672,9 @@ function errBlock(text, m, chat) {
   e.className = "msg-err";
   e.innerHTML = icon("alert") + '<div class="err-body"><span></span></div>';
   const span = e.querySelector("span"); span.textContent = text;
-  // Gemini 3.6 Flash / 2.5 Flash overloaded: point to Flash-Lite, which almost always works, with a one-click switch
-  const slow = ["gemini-3.6-flash", "gemini-2.5-flash"];
-  if (/Gemini is overloaded/i.test(text) && slow.includes(m?.errModel || chat?.model) && config.models.some((x) => x.id === "gemini-3.5-flash-lite")) {
+  // any failed request on another model: point to Flash-Lite, which almost always works, with a one-click switch
+  const usedM = m?.errModel || chat?.model;
+  if (usedM && usedM !== "gemini-3.5-flash-lite" && !/free Gemini tokens|Not signed in|expired/i.test(text) && config.models.some((x) => x.id === "gemini-3.5-flash-lite")) {
     span.textContent = text + " Try Gemini 3.5 Flash-Lite instead, it's the most reliable.";
     const b = document.createElement("button"); b.type = "button"; b.className = "err-switch"; b.textContent = "Switch to 3.5 Flash-Lite";
     b.onclick = () => {
@@ -681,7 +803,7 @@ async function streamReply() {
     raf = 0;
     if (current !== chat) return;
     bubble.innerHTML = "";
-    const d = md(text); d.classList.add("cursor");
+    const d = md(text, true); d.classList.add("cursor");
     bubble.appendChild(d);
     scrollDown();
   };

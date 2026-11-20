@@ -360,7 +360,8 @@ header { position: relative; z-index: 30; display: flex; align-items: center; ga
 .md pre .copy { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 7px; border: 1px solid transparent; background: none; color: var(--dim); font: 500 12px var(--sans); }
 .md pre .copy:hover { color: var(--cyan); border-color: var(--line2); background: rgba(var(--a1), .08); }
 .md pre .copy .ic { width: 14px; height: 14px; }
-.hljs { background: none !important; padding: 0 !important; }
+.hljs { background: none !important; }
+.md pre code.hljs { padding: 40px 16px 16px !important; }
 .md blockquote { margin: .8em 0; padding: 4px 14px; border-left: 3px solid var(--mag); color: #c6c9e6; background: rgba(var(--a2), .05); border-radius: 0 10px 10px 0; }
 .md table { border-collapse: collapse; display: block; overflow-x: auto; margin: 1em 0; }
 .md th, .md td { border: 1px solid var(--line2); padding: 7px 12px; } .md th { background: rgba(var(--a1), .08); }
@@ -830,3 +831,53 @@ body.in-app .rs-dim { opacity: 1; }
   background: linear-gradient(120deg, #3dffa8, #3df0ff); box-shadow: 0 0 16px rgba(61, 255, 168, .35); transition: transform .2s, box-shadow .25s, opacity .25s; }
 .err-switch:hover { transform: translateY(-1px); box-shadow: 0 0 22px rgba(61, 255, 168, .55); }
 .err-switch:disabled { opacity: .55; cursor: default; transform: none; box-shadow: none; }
+
+/* ---------- code / preview panel (like Gemini's canvas) ---------- */
+.md pre .grp { display: flex; gap: 2px; }
+.artifact { position: relative; margin: 14px 0; border-radius: 18px; overflow: hidden; background: rgba(var(--pop), .9); border: 1px solid var(--line2); box-shadow: 0 18px 60px rgba(0, 0, 0, .5), 0 0 40px rgba(var(--a1), .1);
+  animation: rise .6s cubic-bezier(.2, .9, .25, 1) both; }
+.artifact.live { animation: none; }
+.art-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px; flex-wrap: wrap; background: rgba(255, 255, 255, .03); border-bottom: 1px solid var(--line); }
+.art-title { display: flex; align-items: center; gap: 9px; min-width: 0; flex: 1 1 160px; font-size: 14.5px; font-weight: 600; color: var(--txt); }
+.art-title .ic { width: 16px; height: 16px; color: var(--cyan); flex: none; }
+.art-title b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artifact.live .art-title b { background: linear-gradient(90deg, var(--cyan), var(--mag), var(--cyan)); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: sheen 1.6s linear infinite; }
+@keyframes sheen { to { background-position: -200% 0; } }
+.art-tabs { position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 11px; background: rgba(255, 255, 255, .05); border: 1px solid var(--line); }
+.art-tabs button { position: relative; z-index: 1; border: 0; background: none; padding: 6px 15px; border-radius: 8px; font: inherit; font-size: 13px; font-weight: 600; color: var(--dim); cursor: pointer; transition: color .3s; }
+.art-tabs button.active, .art-tabs[data-t="code"] button[data-t="code"], .art-tabs[data-t="preview"] button[data-t="preview"] { color: #fff; }
+.art-tabs button:disabled { opacity: .45; cursor: default; }
+.art-ink { position: absolute; z-index: 0; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 8px; background: linear-gradient(120deg, rgba(var(--a1), .25), rgba(var(--a2), .22)); box-shadow: 0 0 14px rgba(var(--a1), .25), inset 0 0 0 1px rgba(255, 255, 255, .1); transition: transform .5s cubic-bezier(.3, 1.25, .4, 1); }
+.art-tabs[data-t="preview"] .art-ink { transform: translateX(100%); }
+.art-acts { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.art-btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 11px; border-radius: 10px; border: 1px solid transparent; background: none; color: var(--dim); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: color .2s, background .2s, border-color .2s, transform .2s; }
+.art-btn .ic { width: 16px; height: 16px; }
+.art-btn.ico { width: 34px; padding: 0; justify-content: center; }
+.art-btn:hover:not(:disabled) { color: var(--cyan); background: rgba(var(--a1), .09); border-color: var(--line2); }
+.art-btn:active:not(:disabled) { transform: scale(.94); }
+.art-btn:disabled { opacity: .4; cursor: default; }
+.art-body { position: relative; height: min(66vh, 600px); }
+.art-pane { position: absolute; inset: 0; opacity: 0; pointer-events: none; transform: translateY(10px) scale(.992); filter: blur(5px); transition: opacity .35s ease, transform .5s cubic-bezier(.3, 1.25, .4, 1), filter .35s ease; }
+.art-pane.on { opacity: 1; pointer-events: auto; transform: none; filter: none; }
+.art-codepane { overflow: auto; background: var(--code); }
+.md .art-codepane pre { margin: 0; border: 0; border-radius: 0; box-shadow: none; background: none; overflow: visible; }
+.md .art-codepane pre code { padding: 16px 18px; font-size: 13px; line-height: 1.6; white-space: pre; display: block; min-width: max-content; }
+.art-prevpane { background: #fff; }
+.art-prevpane iframe { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
+.art-loading { position: absolute; inset: 0; z-index: 2; display: grid; place-content: center; justify-items: center; gap: 12px; background: var(--code); color: var(--dim); font-size: 13px; transition: opacity .4s ease, visibility 0s .4s; }
+.art-loading i { width: 26px; height: 26px; border-radius: 50%; border: 3px solid rgba(var(--a1), .2); border-top-color: var(--cyan); animation: rot .8s linear infinite; }
+.art-loading.gone { opacity: 0; visibility: hidden; pointer-events: none; }
+.artifact.closed .art-head { border-bottom-color: transparent; }
+/* fullscreen: the browser's own fullscreen where it exists, a fixed full-screen layer where it doesn't (iPhone) */
+.artifact:fullscreen, .artifact.is-fs { position: fixed; inset: 0; z-index: 400; width: 100vw; height: 100vh; margin: 0; border-radius: 0; display: flex; flex-direction: column; background: var(--bg); }
+.artifact:fullscreen .art-wrap, .artifact.is-fs .art-wrap { flex: 1; min-height: 0; }
+.artifact:fullscreen .collapse-in, .artifact.is-fs .collapse-in { height: 100%; }
+.artifact:fullscreen .art-body, .artifact.is-fs .art-body { height: 100%; }
+@media (max-width: 640px) {
+  .art-btn span { display: none; } .art-btn { width: 34px; padding: 0; justify-content: center; }
+  .art-head { padding: 8px 8px 8px 12px; } .art-title { flex-basis: 100%; }
+  .art-tabs { order: 2; } .art-acts { order: 3; }
+}
+
+.md .art-codepane pre code.hljs { padding: 16px 18px !important; }
+.artifact.live .collapse, .artifact.live .collapse-in > * { animation: none !important; transition: none !important; }   /* the live panel is redrawn every frame while streaming: no entrance animation, or it would stay invisible */
