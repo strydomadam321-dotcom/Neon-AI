@@ -710,8 +710,9 @@ app.post("/api/dev/nuke", requireAuth, small, wrap(async (req, res) => {
   if (!req.user.dev) return res.status(403).json({ error: "Not allowed." });
   if (limited("nuke:" + req.user.id, 5, 15 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
   if (req.body?.confirm !== "NUKE") return res.status(400).json({ error: "Type NUKE exactly to confirm." });
-  await q("insert into site_state(key,set_at,set_by) values('nuked',now(),$1) on conflict(key) do update set set_at = now(), set_by = $1", [req.user.username]);
-  nukedAt = Date.now();
+  // use the database's own timestamp (not the app clock), so the value is identical after every restart and bypass passes stay valid
+  const ins = await q("insert into site_state(key,set_at,set_by) values('nuked',now(),$1) on conflict(key) do update set set_at = now(), set_by = $1 returning set_at", [req.user.username]);
+  nukedAt = new Date(ins.rows[0].set_at).getTime();
   console.warn(`NUKE: site taken offline by ${req.user.username} at ${new Date(nukedAt).toISOString()}`);
   res.json({ ok: true });
 }));
