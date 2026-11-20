@@ -18,7 +18,7 @@ A neon, ChatGPT-style web chat for Claude. Accounts with username + password, ch
 |---|---|---|
 | `DATABASE_URL` | yes | Postgres connection string (Render fills this in from `render.yaml`) |
 | `ANTHROPIC_API_KEY` | yes | Your Anthropic key |
-| `SIGNUP_ANSWER` | yes | Secret answer to the signup question. If unset, signups are closed |
+| `OWNER_USERNAMES` | no | Comma-separated usernames that always get the Max plan (full access, no limits) |
 | `GEMINI_API_KEY` | no | Free Google AI Studio key. Enables the Gemini models in the model menu |
 | `GEMINI_MODELS` | no | Override the Gemini model list: `id|Display name,id|Display name` (defaults: gemini-3.5-flash-lite, gemini-2.5-flash) |
 | `TITLE_MODEL` | no | Gemini model that writes chat titles (default `gemini-3.5-flash`) |

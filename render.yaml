@@ -22,5 +22,5 @@ services:
           property: connectionString
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: SIGNUP_ANSWER
+      - key: OWNER_USERNAMES
         sync: false

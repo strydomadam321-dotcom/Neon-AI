@@ -16,8 +16,10 @@ const ls = {
 };
 
 // ---------- state ----------
-let config = { models: [], defaultModel: "", needsInvite: false, hasKey: true, hasGemini: false, defaultEffort: 1 };
+let config = { models: [], defaultModel: "", plans: [], freeTokens: 50000, plusClaudeMsgs: 50, hasKey: true, hasGemini: false, defaultEffort: 1 };
 let user = null;
+let plan = { id: "free", requested: null, owner: false, usedTokens: 0, usedClaude: 0 };
+let signupPlan = "free";
 const readLook = () => { try { return JSON.parse(localStorage.getItem("neon-look") || "{}") || {}; } catch { return {}; } };
 let settings = { system: "", model: "", effort: 1, retro: false, bg: true, flicker: true, gfx: readLook().gfx === "gpu" ? "gpu" : "cpu" };
 let chats = [];          // metadata list for the sidebar: {id,title,model,created,updated}
@@ -89,7 +91,8 @@ function setMode(m) {
   authEls.btn.querySelector(".lbl").textContent = m === "login" ? "Sign in" : "Create account";
   authEls.pass.autocomplete = m === "login" ? "current-password" : "new-password";
   $("strength").hidden = m !== "signup";
-  $("fInvite").hidden = !(m === "signup" && config.needsInvite);
+  $("planPick").hidden = m !== "signup";
+  if (m === "signup") renderPlanGrid($("planGrid"), { pick: true });
   authEls.err.textContent = "";
   document.querySelectorAll(".field.bad").forEach((f) => f.classList.remove("bad"));
 }
@@ -121,7 +124,7 @@ function fieldErr(id, msg) {
   const f = $(id); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad");
   f.querySelector("input")?.focus();
 }
-["username", "password", "invite"].forEach((id) => $(id).addEventListener("input", () => { $(id).closest(".field").classList.remove("bad"); authEls.err.textContent = ""; }));
+["username", "password"].forEach((id) => $(id).addEventListener("input", () => { $(id).closest(".field").classList.remove("bad"); authEls.err.textContent = ""; }));
 
 authEls.form.onsubmit = async (e) => {
   e.preventDefault();
@@ -130,18 +133,17 @@ authEls.form.onsubmit = async (e) => {
   if (mode === "signup" && !/^[A-Za-z0-9_.-]{3,24}$/.test(username)) return fieldErr("fUser", "Username: 3-24 characters, letters, numbers, . _ -");
   if (!password) return fieldErr("fPass", "Enter your password.");
   if (mode === "signup" && password.length < 8) return fieldErr("fPass", "Password must be at least 8 characters.");
-  if (mode === "signup" && !$("invite").value.trim()) return fieldErr("fInvite", "Answer the question to create an account.");
   authEls.btn.classList.add("loading"); authEls.btn.disabled = true;
   try {
     const data = await api(mode === "login" ? "/api/login" : "/api/signup", {
       method: "POST", noAuthRedirect: true,
-      body: { username, password, remember: $("remember").checked, answer: $("invite").value },
+      body: { username, password, remember: $("remember").checked, plan: signupPlan },
     });
-    authEls.pass.value = ""; $("invite").value = "";
+    authEls.pass.value = "";
     await enterApp(data);
-    if (mode === "signup") toast("Account created. Welcome aboard.");
+    if (mode === "signup") toast(signupPlan === "free" ? "Account created. Welcome aboard." : "Account created on Free. We'll switch on your plan when payments open.");
   } catch (err) {
-    const map = { username: "fUser", password: "fPass", answer: "fInvite" };
+    const map = { username: "fUser", password: "fPass" };
     if (map[err.field]) fieldErr(map[err.field], err.message);
     else { authEls.err.textContent = err.message; if (err.status === 401) { const f = $("fPass"); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad"); } }
   } finally {
@@ -160,6 +162,77 @@ function showAuth(msg = "") {
   authEls.err.textContent = msg;
   authEls.user.focus();
 }
+
+
+// ---------- plans ----------
+const PLAN_COPY = {
+  free: { badge: "", feats: ["50,000 Gemini tokens a day", "Gemini 3.5 Flash-Lite and 2.5 Flash", "Chats synced on every device", "Images, PDFs, Word and PowerPoint"], off: ["Claude models"], support: "Community support" },
+  spark: { badge: "", feats: ["Unlimited Gemini, no daily cap", "Gemini 3.5 Flash-Lite and 2.5 Flash", "Chats synced on every device", "Images, PDFs, Word and PowerPoint"], off: ["Claude models"], support: "Email support" },
+  plus: { badge: "Popular", feats: ["Everything in Spark", "Claude Sonnet and Haiku", "Fair use: 50 Claude messages a day", "Unlimited Gemini"], off: [], support: "Priority email support" },
+  max: { badge: "Best value", feats: ["Everything in Plus", "Claude Opus, the smartest model", "No limit on Claude messages", "Early access to new features"], off: [], support: "Priority support, answered first" },
+};
+const tickIc = () => icon("check");
+function planCardHTML(p, opts) {
+  const c = PLAN_COPY[p.id] || { feats: [], off: [] };
+  const price = p.price === 0 ? "Free" : "A$" + p.price;
+  const cur = opts.current === p.id;
+  const sel = opts.pick && signupPlan === p.id;
+  const cta = opts.pick ? (sel ? "Selected" : "Select") : cur ? "Your plan" : p.price === 0 ? "Included" : (plan.requested === p.id ? "Requested" : "Choose plan");
+  return `<button type="button" class="plan${cur ? " current" : ""}" data-id="${p.id}" role="${opts.pick ? "radio" : "button"}" ${opts.pick ? `aria-checked="${sel}"` : ""}>
+    ${c.badge ? `<span class="badge">${c.badge}</span>` : ""}
+    <span class="pname">${p.name}</span><span class="ptag">${p.tag}</span>
+    <span class="price"><b>${price}</b>${p.price ? "<span>/ month</span>" : "<span>forever</span>"}</span>
+    <ul>${c.feats.map((f) => `<li>${tickIc()}<span>${f}</span></li>`).join("")}${(c.off || []).map((f) => `<li class="off">${icon("x")}<span>${f}</span></li>`).join("")}<li>${tickIc()}<span>${c.support}</span></li></ul>
+    <span class="pcta">${cta}</span></button>`;
+}
+function renderPlanGrid(box, opts = {}) {
+  box.innerHTML = (config.plans || []).map((p) => planCardHTML(p, opts)).join("");
+  box.querySelectorAll(".plan").forEach((b) => (b.onclick = () => {
+    const id = b.dataset.id;
+    if (opts.pick) { signupPlan = id; renderPlanGrid(box, opts); return; }
+    choosePlan(id);
+  }));
+}
+async function choosePlan(id) {
+  if (id === plan.id) return;
+  if (id === "free") { toast("You're on a paid plan; contact support to downgrade."); return; }
+  try {
+    const d = await api("/api/plan/request", { method: "POST", body: { plan: id } });
+    plan = d.plan; renderPlans(); renderPlanSettings();
+    toast("Got it. We'll switch on " + (config.plans.find((p) => p.id === id)?.name || "your plan") + " when payments open.");
+  } catch (e) { toast(e.message, "err"); }
+}
+function renderPlans() { renderPlanGrid($("plansGrid"), { current: plan.id }); }
+function openPlans() { renderPlans(); $("plans").classList.remove("hidden"); }
+$("closePlans").onclick = () => $("plans").classList.add("hidden");
+$("plans").onmousedown = (e) => { if (e.target === $("plans")) $("plans").classList.add("hidden"); };
+$("seePlans").onclick = openPlans;
+function renderPlanSettings() {
+  const p = config.plans.find((x) => x.id === plan.id) || { name: "Free" };
+  $("planName").textContent = p.name + (plan.owner ? " (owner)" : "");
+  const req = plan.requested ? ` Requested: ${config.plans.find((x) => x.id === plan.requested)?.name}, switches on when payments open.` : "";
+  const box = $("usageBox");
+  if (plan.id === "free") {
+    const pct = Math.min(100, Math.round((plan.usedTokens / config.freeTokens) * 100));
+    $("planSub").textContent = "Gemini only, with a daily token limit." + req;
+    box.hidden = false; $("usageFill").style.width = pct + "%"; $("usageFill").classList.toggle("hot", pct >= 85);
+    $("usageTxt").textContent = `${plan.usedTokens.toLocaleString()} of ${config.freeTokens.toLocaleString()} Gemini tokens used today. Resets at midnight UTC.`;
+  } else if (plan.id === "plus") {
+    $("planSub").textContent = "Unlimited Gemini, plus Claude Sonnet and Haiku." + req;
+    box.hidden = false; const pct = Math.min(100, Math.round((plan.usedClaude / config.plusClaudeMsgs) * 100));
+    $("usageFill").style.width = pct + "%"; $("usageFill").classList.toggle("hot", pct >= 85);
+    $("usageTxt").textContent = `${plan.usedClaude} of ${config.plusClaudeMsgs} Claude messages used today.`;
+  } else {
+    $("planSub").textContent = (plan.id === "max" ? "Everything, unlimited." : "Unlimited Gemini.") + req;
+    box.hidden = true;
+  }
+}
+const modelLocked = (id) => {
+  const m = config.models.find((x) => x.id === id);
+  if (!m || m.provider !== "claude") return false;
+  if (plan.id === "max") return false;
+  return plan.id !== "plus" || /opus/i.test(id);
+};
 
 // ---------- markdown ----------
 marked.setOptions({ breaks: true, gfm: true });
@@ -425,6 +498,7 @@ async function streamReply() {
         if (ev.t) { text += ev.t; if (!raf) raf = requestAnimationFrame(paint); }
         if (ev.th && !text) { const lb = bubble.querySelector(".thinking"); if (lb && !lb.dataset.l) { lb.dataset.l = 1; lb.insertAdjacentHTML("beforeend", '<span class="think-lbl">Thinking</span>'); } }
         if (ev.error) errMsg = ev.error;
+        if (ev.tokens != null) { plan.usedTokens = ev.tokens; renderPlanSettings(); }
       }
     }
   } catch (e) {
@@ -770,7 +844,9 @@ function buildModelMenu() {
     b.style.setProperty("--c", c); b.style.setProperty("--rgb", rgb);
     b.innerHTML = `<span class="dd-dot"></span><span class="txt"><span class="nm"></span><span class="ds"></span></span>${icon("check", "tick")}`;
     b.querySelector(".nm").textContent = n; b.querySelector(".ds").textContent = d;
-    b.onclick = () => { els.model.value = o.value; syncModelUI(); els.model.onchange(); toggleDD(false); dd.btn.focus(); };
+    if (modelLocked(o.value)) { b.classList.add("locked"); b.querySelector(".txt").insertAdjacentHTML("afterend", `<span class="lockTag">${plan.id === "plus" ? "Max" : "Plus"}</span>`); }
+    b.onclick = () => {
+      if (modelLocked(o.value)) { toggleDD(false); toast((plan.id === "plus" ? "Opus is part of the Max plan." : "Claude is part of Plus and Max.") + " Opening plans."); openPlans(); return; } els.model.value = o.value; syncModelUI(); els.model.onchange(); toggleDD(false); dd.btn.focus(); };
     dd.menu.appendChild(b);
   });
   syncModelUI();
@@ -975,14 +1051,15 @@ addEventListener("focus", syncNow);
 
 // ---------- boot ----------
 async function enterApp(data) {
-  user = data.user; settings = { system: "", model: "", effort: config.defaultEffort ?? 1, retro: false, bg: true, flicker: true, ...(data.settings || {}), gfx: readLook().gfx === "gpu" ? "gpu" : "cpu" };
+  user = data.user; plan = data.plan || plan; settings = { system: "", model: "", effort: config.defaultEffort ?? 1, retro: false, bg: true, flicker: true, ...(data.settings || {}), gfx: readLook().gfx === "gpu" ? "gpu" : "cpu" };
   $("auth").classList.add("hidden"); $("app").classList.remove("hidden"); document.body.classList.add("in-app"); applyLook();
   $("meName").textContent = user.username; $("meAvatar").textContent = user.username[0];
   $("setName").textContent = user.username; $("setAvatar").textContent = user.username[0];
   els.model.innerHTML = "";
   config.models.forEach((m) => { const o = new Option(m.name, m.id); o.dataset.provider = m.provider; els.model.add(o); });
-  els.model.value = config.models.some((m) => m.id === settings.model) ? settings.model : config.defaultModel;
-  buildModelMenu();
+  const okModel = (id) => config.models.some((m) => m.id === id) && !modelLocked(id);
+  els.model.value = okModel(settings.model) ? settings.model : okModel(config.defaultModel) ? config.defaultModel : (config.models.find((m) => !modelLocked(m.id)) || config.models[0]).id;
+  buildModelMenu(); renderPlanSettings();
   if (config.hasKey === false) $("emptyMsg").textContent = "The server has no ANTHROPIC_API_KEY yet. Add it in Render's environment settings.";
   els.search.value = "";
   current = null;

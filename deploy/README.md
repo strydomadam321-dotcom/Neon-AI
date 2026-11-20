@@ -63,7 +63,7 @@ It asks for three things (press Enter to skip any):
 
 - your **Anthropic API key**
 - your **Gemini API key**
-- the **secret answer** people must give to create an account (without it nobody can sign up)
+- your own **username** (optional) to keep full access with no limits
 
 Then it installs everything, starts NEON AI, and prints the address to open, for example `http://192.168.1.42:3000`,
 from any phone or computer on the same Wi-Fi.
@@ -91,7 +91,7 @@ Do **not** forward port 3000 on your router: the app speaks plain HTTP. Use one 
 |---|---|
 | see the log | `sudo journalctl -u neon-ai -f` |
 | restart it | `sudo systemctl restart neon-ai` |
-| change a key or the secret answer | `sudo nano /etc/neon-ai.env`, then restart |
+| change a key | `sudo nano /etc/neon-ai.env`, then restart |
 | update to new code | `cd ~/Neon-AI && git pull && sudo bash deploy/setup-ubuntu.sh` |
 | check it is healthy | `curl http://localhost:3000/api/config` |
 | make a backup right now | `sudo /usr/local/bin/neon-ai-backup` |

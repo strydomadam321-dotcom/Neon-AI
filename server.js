@@ -32,10 +32,23 @@ const GEMINI_BASE = process.env.GEMINI_BASE_URL || "https://generativelanguage.g
 const TITLE_MODEL = process.env.TITLE_MODEL || "gemini-3.5-flash";
 const DEFAULT_EFFORT = 1; // 0 Low, 1 Medium, 2 High, 3 Max
 const DEFAULT_MODEL = process.env.DEFAULT_MODEL || MODELS[0].id;
-// Signup gate: people must answer this question to create an account (keeps strangers from spending your credits).
-// The answer lives only in the SIGNUP_ANSWER environment variable (never in the code). If it is unset, signups are closed.
-const SIGNUP_ANSWER = (process.env.SIGNUP_ANSWER || "").trim().toLowerCase();
-if (!SIGNUP_ANSWER) console.warn("SIGNUP_ANSWER is not set: new signups are disabled.");
+// ---------- plans ----------
+// Payments are not connected yet, so nobody can buy a paid plan: choosing one at signup is only recorded
+// (users.plan_requested) and the account runs on Free. Set a user's real plan by hand with
+//   update users set plan = 'max' where username_lc = '...';   (free | spark | plus | max)
+// OWNER_USERNAMES (comma separated) always get full access.
+const FREE_GEMINI_TOKENS_PER_DAY = 50000;
+const PLUS_CLAUDE_MSGS_PER_DAY = 50;
+const PLAN_IDS = ["free", "spark", "plus", "max"];
+const PLANS = [
+  { id: "free", name: "Free", price: 0, tag: "Try it out", gemini: "50k tokens / day", claude: "none" },
+  { id: "spark", name: "Spark", price: 5, tag: "Unlimited Gemini", gemini: "unlimited", claude: "none" },
+  { id: "plus", name: "Plus", price: 12, tag: "Gemini + Claude", gemini: "unlimited", claude: "limited" },
+  { id: "max", name: "Max", price: 22, tag: "Everything, unlimited", gemini: "unlimited", claude: "unlimited" },
+];
+const OWNERS = new Set((process.env.OWNER_USERNAMES || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean));
+const effectivePlan = (u) => (OWNERS.has(String(u.username).toLowerCase()) ? "max" : PLAN_IDS.includes(u.plan) ? u.plan : "free");
+const claudeAllowed = (plan, modelId) => plan === "max" || (plan === "plus" && !/opus/i.test(modelId));
 const SYSTEM =
   "You are a helpful, sharp AI assistant inside a futuristic neon chat app. " +
   "Answer clearly and concisely. Use Markdown, and fenced code blocks with language tags for code.";
@@ -86,7 +99,22 @@ create table if not exists chats(
   primary key(user_id, id)
 );
 create index if not exists chats_user_updated on chats(user_id, updated_at desc);
+alter table users add column if not exists plan text not null default 'free';
+alter table users add column if not exists plan_requested text;
+create table if not exists usage(
+  user_id int not null references users(id) on delete cascade,
+  day date not null default current_date,
+  gemini_tokens bigint not null default 0,
+  claude_msgs int not null default 0,
+  primary key(user_id, day)
+);
+create table if not exists meta(key text primary key, done_at timestamptz not null default now());
 `);
+// one-time reset requested by the owner: removes every account, chat and session, once
+{
+  const r = await q("insert into meta(key) values('reset-2026-11-plans') on conflict do nothing returning key");
+  if (r.rowCount) { await q("truncate users restart identity cascade"); console.log("One-time reset done: all accounts and chats removed."); }
+}
 const cleanup = () => q("delete from sessions where expires_at < now()").catch(() => {});
 cleanup();
 setInterval(cleanup, 60 * 60 * 1000).unref();
@@ -142,7 +170,7 @@ const requireAuth = wrap(async (req, res, next) => {
   const token = getCookie(req, COOKIE);
   if (!token) return res.status(401).json({ error: "Not signed in" });
   const { rows } = await q(
-    `select u.id, u.username, u.settings from sessions s join users u on u.id = s.user_id
+    `select u.id, u.username, u.settings, u.plan, u.plan_requested from sessions s join users u on u.id = s.user_id
      where s.token_hash = $1 and s.expires_at > now()`, [sha(token)]);
   if (!rows[0]) { res.clearCookie(COOKIE, { path: "/" }); return res.status(401).json({ error: "Session expired" }); }
   req.user = rows[0]; req.token = token;
@@ -163,7 +191,7 @@ const big = express.json({ limit: "45mb" });
 
 // ---------- auth ----------
 app.get("/api/config", (req, res) => {
-  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, needsInvite: true, hasKey: !!process.env.ANTHROPIC_API_KEY, hasGemini: !!GEMINI_KEY, defaultEffort: DEFAULT_EFFORT });
+  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: false, hasKey: !!process.env.ANTHROPIC_API_KEY, hasGemini: !!GEMINI_KEY, defaultEffort: DEFAULT_EFFORT });
 });
 
 const USER_RE = /^[A-Za-z0-9_.-]{3,24}$/;
@@ -171,30 +199,24 @@ const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", 10);
 
 app.post("/api/signup", small, wrap(async (req, res) => {
   if (limited("signup:" + req.ip, 8, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
-  const { username, password, remember, answer } = req.body || {};
+  const { username, password, remember, plan } = req.body || {};
   if (typeof username !== "string" || !USER_RE.test(username))
     return res.status(400).json({ error: "Username must be 3-24 characters: letters, numbers, . _ -", field: "username" });
   if (typeof password !== "string" || password.length < 8)
     return res.status(400).json({ error: "Password must be at least 8 characters.", field: "password" });
   if (Buffer.byteLength(password) > 72)
     return res.status(400).json({ error: "Password is too long (72 bytes max).", field: "password" });
-  {
-    if (!SIGNUP_ANSWER) return res.status(503).json({ error: "Signups are currently closed." });
-    const a = Buffer.from(String(answer || "").trim().toLowerCase()), b = Buffer.from(SIGNUP_ANSWER);
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b))
-      return res.status(403).json({ error: "That's not the right answer.", field: "answer" });
-  }
   const hash = await bcrypt.hash(password, 11);
   let user;
   try {
-    ({ rows: [user] } = await q("insert into users(username,username_lc,pass_hash) values($1,$2,$3) returning id,username,settings",
-      [username, username.toLowerCase(), hash]));
+    ({ rows: [user] } = await q("insert into users(username,username_lc,pass_hash,plan_requested) values($1,$2,$3,$4) returning id,username,settings,plan,plan_requested",
+      [username, username.toLowerCase(), hash, PLAN_IDS.includes(plan) && plan !== "free" ? plan : null]));
   } catch (e) {
     if (e.code === "23505") return res.status(409).json({ error: "That username is taken.", field: "username" });
     throw e;
   }
   await startSession(req, res, user.id, !!remember);
-  res.json({ user: { username: user.username }, settings: user.settings });
+  res.json(await mePayload(user));
 }));
 
 app.post("/api/login", small, wrap(async (req, res) => {
@@ -202,13 +224,13 @@ app.post("/api/login", small, wrap(async (req, res) => {
   if (typeof username !== "string" || typeof password !== "string") return res.status(400).json({ error: "Enter your username and password." });
   const key = "login:" + req.ip + ":" + username.toLowerCase();
   if (limited(key, 8, 15 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again in a few minutes." });
-  const { rows } = await q("select id,username,pass_hash,settings from users where username_lc = $1", [username.toLowerCase()]);
+  const { rows } = await q("select id,username,pass_hash,settings,plan,plan_requested from users where username_lc = $1", [username.toLowerCase()]);
   const user = rows[0];
   const ok = await bcrypt.compare(password.slice(0, 200), user ? user.pass_hash : DUMMY_HASH);
   if (!user || !ok) return res.status(401).json({ error: "Wrong username or password." });
   hits.delete(key);
   await startSession(req, res, user.id, !!remember);
-  res.json({ user: { username: user.username }, settings: user.settings });
+  res.json(await mePayload(user));
 }));
 
 app.post("/api/logout", wrap(async (req, res) => {
@@ -218,7 +240,18 @@ app.post("/api/logout", wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.get("/api/me", requireAuth, (req, res) => res.json({ user: { username: req.user.username }, settings: req.user.settings }));
+async function todayUsage(userId) {
+  const { rows } = await q("select gemini_tokens, claude_msgs from usage where user_id=$1 and day=current_date", [userId]);
+  return { gemini: Number(rows[0]?.gemini_tokens || 0), claude: rows[0]?.claude_msgs || 0 };
+}
+async function mePayload(u) {
+  const plan = effectivePlan(u), use = await todayUsage(u.id);
+  return {
+    user: { username: u.username }, settings: u.settings,
+    plan: { id: plan, requested: u.plan_requested && u.plan_requested !== plan ? u.plan_requested : null, owner: OWNERS.has(u.username.toLowerCase()), usedTokens: use.gemini, usedClaude: use.claude },
+  };
+}
+app.get("/api/me", requireAuth, wrap(async (req, res) => res.json(await mePayload(req.user))));
 
 app.put("/api/settings", requireAuth, small, wrap(async (req, res) => {
   const cur = req.user.settings || {};
@@ -234,6 +267,13 @@ app.put("/api/settings", requireAuth, small, wrap(async (req, res) => {
   };
   await q("update users set settings = $1 where id = $2", [s, req.user.id]);
   res.json({ settings: s });
+}));
+
+app.post("/api/plan/request", requireAuth, small, wrap(async (req, res) => {
+  const id = req.body?.plan;
+  if (!PLAN_IDS.includes(id) || id === "free") return res.status(400).json({ error: "Unknown plan." });
+  await q("update users set plan_requested = $1 where id = $2", [id, req.user.id]);
+  res.json(await mePayload({ ...req.user, plan_requested: id }));
 }));
 
 // permanently delete the signed-in account (chats and sessions go with it via ON DELETE CASCADE)
@@ -487,7 +527,7 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
     return { role: "user", parts };
   });
 
-  let sentText = false;
+  let sentText = false, tokens = 0;
   async function attempt(withThinking) {
     const generationConfig = { maxOutputTokens: 32000 };
     const th = withThinking ? geminiThinking(model, effort) : null;
@@ -509,6 +549,7 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
         const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
         if (!line.startsWith("data:")) continue;
         let j; try { j = JSON.parse(line.slice(5)); } catch { continue; }
+        if (j.usageMetadata?.totalTokenCount) tokens = j.usageMetadata.totalTokenCount;
         if (j.promptFeedback?.blockReason) blocked = j.promptFeedback.blockReason;
         const cand = j.candidates?.[0];
         for (const p of cand?.content?.parts || []) {
@@ -528,6 +569,7 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
     // some models reject thinking settings: retry once without them
     if (e.status === 400 && e.hadThinking && !sentText && !/api key/i.test(e.message)) await attempt(false); else throw e;
   }
+  return tokens;
 }
 
 app.post("/api/chat", requireAuth, big, async (req, res) => {
@@ -543,6 +585,19 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
   if (!history.length) return res.status(400).json({ error: "No messages" });
   const system = String(req.user.settings?.system || "").trim().slice(0, 4000) || SYSTEM;
 
+  const plan = effectivePlan(req.user);
+  const use = await todayUsage(req.user.id);
+  let block = "";
+  if (info.provider === "gemini") {
+    if (plan === "free" && use.gemini >= FREE_GEMINI_TOKENS_PER_DAY) block = `You've used your ${FREE_GEMINI_TOKENS_PER_DAY.toLocaleString()} free Gemini tokens for today. They reset at midnight UTC. Upgrade to Spark for unlimited Gemini.`;
+  } else if (!claudeAllowed(plan, info.id)) {
+    block = plan === "plus" ? "Opus is included with the Max plan. Pick Sonnet or Haiku, or upgrade to Max."
+      : "Claude models are part of the Plus and Max plans. Pick a Gemini model, or upgrade your plan.";
+  } else if (plan === "plus" && use.claude >= PLUS_CLAUDE_MSGS_PER_DAY) {
+    block = `You've reached today's ${PLUS_CLAUDE_MSGS_PER_DAY} Claude messages on Plus. Use Gemini (unlimited), or upgrade to Max for unlimited Claude.`;
+  }
+  if (block) return res.status(403).json({ error: block, upgrade: true });
+
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache, no-transform",
@@ -557,8 +612,9 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
   try {
     if (info.provider === "gemini") {
       if (!GEMINI_KEY) throw Object.assign(new Error("Gemini isn't set up yet. Add GEMINI_API_KEY in Render's Environment settings."), { provider: "gemini", status: 0 });
-      await geminiStream({ model: info.id, history, system, effort, send, signal: ctl.signal });
-      send({ done: true });
+      const used = await geminiStream({ model: info.id, history, system, effort, send, signal: ctl.signal });
+      if (used > 0) q("insert into usage(user_id,day,gemini_tokens) values($1,current_date,$2) on conflict(user_id,day) do update set gemini_tokens = usage.gemini_tokens + $2", [req.user.id, used]).catch(() => {});
+      send({ done: true, tokens: use.gemini + (used || 0) });
     } else {
       const cfg = CLAUDE_THINK[effort];
       let gotText = false;
@@ -582,6 +638,7 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
       }
       if (final.stop_reason === "refusal") send({ t: "\n\n*(The model declined to answer this request.)*" });
       if (final.stop_reason === "max_tokens") send({ t: "\n\n*(Reached max length.)*" });
+      q("insert into usage(user_id,day,claude_msgs) values($1,current_date,1) on conflict(user_id,day) do update set claude_msgs = usage.claude_msgs + 1", [req.user.id]).catch(() => {});
       send({ done: true, usage: final.usage });
     }
   } catch (err) {

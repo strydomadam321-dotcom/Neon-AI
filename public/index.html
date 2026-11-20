@@ -129,6 +129,12 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
       <span class="tab-ink"></span>
     </div>
 
+    <div id="planPick" class="plan-pick" hidden>
+      <h4 class="pick-title">Choose your plan</h4>
+      <div id="planGrid" class="plan-grid" role="radiogroup" aria-label="Plan"></div>
+      <p class="pay-note"><svg class="ic"><use href="#i-info"/></svg><span>Paid plans open soon. Pick one now and we'll switch it on for your account the moment payments go live. You start on Free today, no card needed.</span></p>
+    </div>
+
     <form id="authForm" novalidate autocomplete="on">
       <label class="field" id="fUser">
         <svg class="ic"><use href="#i-user"/></svg>
@@ -143,11 +149,6 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
         <div class="bars"><i></i><i></i><i></i><i></i></div>
         <span id="strengthTxt">At least 8 characters</span>
       </div>
-      <label class="field" id="fInvite" hidden>
-        <svg class="ic"><use href="#i-shield"/></svg>
-        <input id="invite" name="answer" type="text" placeholder="What is your youngest cousin's name?" aria-label="What is your youngest cousin's name?" autocomplete="off" spellcheck="false" maxlength="60">
-      </label>
-
       <label class="check">
         <input type="checkbox" id="remember" checked>
         <span class="box"><svg class="ic"><use href="#i-check"/></svg></span>
@@ -261,6 +262,18 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
       </section>
 
       <section class="sec">
+        <h4>Plan &amp; usage</h4>
+        <div class="set-row">
+          <div class="txt"><b id="planName">Free</b><span id="planSub"></span></div>
+          <button id="seePlans" type="button" class="btn small"><svg class="ic"><use href="#i-bolt"/></svg>See plans</button>
+        </div>
+        <div class="usage" id="usageBox" hidden>
+          <div class="usage-bar"><i id="usageFill"></i></div>
+          <span id="usageTxt"></span>
+        </div>
+      </section>
+
+      <section class="sec">
         <h4>Appearance</h4>
         <label class="set-row toggle">
           <div class="txt"><b>Retro mode</b><span>Synthwave sunset with palm trees and a neon grid</span></div>
@@ -314,6 +327,20 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
     <div class="set-foot">
       <span class="spacer"></span>
       <button id="saveSettings" class="btn primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- plans -->
+<div id="plans" class="overlay hidden">
+  <div class="card plans-card spot" role="dialog" aria-modal="true" aria-labelledby="plansTitle">
+    <div class="card-head">
+      <h3 id="plansTitle">Plans</h3>
+      <button class="icon" id="closePlans" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="set-body">
+      <div id="plansGrid" class="plan-grid"></div>
+      <p class="pay-note"><svg class="ic"><use href="#i-info"/></svg><span>Paid plans open soon. Choose one and we'll switch it on for your account the moment payments go live. Until then you stay on your current plan.</span></p>
     </div>
   </div>
 </div>
