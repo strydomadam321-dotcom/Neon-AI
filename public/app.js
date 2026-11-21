@@ -744,9 +744,9 @@ function actsSummary(m) {
   const qs = m.acts.filter((a) => a.k === "search").length, reads = m.acts.find((a) => a.k === "read");
   const wrap = document.createElement("div"); wrap.className = "acts-sum";
   const label = `Searched the web${qs > 1 ? " " + qs + " times" : ""}${m.sources?.length ? " · " + m.sources.length + " sources" : reads ? " · " + reads.t.replace(/^Reading /, "") : ""}`;
-  wrap.innerHTML = `<button type="button" class="acts-btn">${icon("search")}<span></span>${icon("chev", "chev")}</button><div class="collapse"><div class="collapse-in"><div class="acts"></div></div></div>`;
+  wrap.innerHTML = `<button type="button" class="acts-btn">${icon("search")}<span></span>${icon("chev", "chev")}</button><div class="collapse"><div class="collapse-in"><div class="steps"></div></div></div>`;
   wrap.querySelector(".acts-btn span").textContent = label;
-  const list = wrap.querySelector(".acts"); m.acts.forEach((a) => list.appendChild(actRow(a, true)));
+  const list = wrap.querySelector(".steps"); m.acts.forEach((a) => list.appendChild(actRow(a, true)));
   wrap.querySelector(".acts-btn").onclick = (e) => { const open = wrap.querySelector(".collapse").classList.toggle("open"); e.currentTarget.classList.toggle("open", open); };
   return wrap;
 }
@@ -1029,7 +1029,7 @@ async function streamReply() {
   row.querySelector(".actions")?.remove();
   row.classList.add("streaming");
   const bubble = row.querySelector(".bubble");
-  const actsEl = document.createElement("div"); actsEl.className = "acts live";
+  const actsEl = document.createElement("div"); actsEl.className = "steps live";
   const acts = [], sources = []; let searched = false;
   const finishCur = () => actsEl.querySelectorAll(".act.cur").forEach((r) => { r.classList.remove("cur"); r.classList.add("done"); });
   const addAct = (k, t) => {                                   // a new step: the one before it is finished

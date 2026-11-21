@@ -1176,7 +1176,7 @@ body.in-app .rs-dim { opacity: 1; }
 .md .math-block .katex { font-size: 1.22em; }
 
 /* ---------- what the AI is doing (thinking, searching the web) ---------- */
-.acts { display: flex; flex-direction: column; gap: 5px; margin: 4px 0 10px; }
+.steps { display: flex; flex-direction: column; gap: 5px; margin: 4px 0 10px; }
 .act { display: flex; align-items: center; gap: 9px; font-size: 13.5px; color: var(--dim); animation: lpUp .45s cubic-bezier(.2, .9, .25, 1) both; }
 .act-i { position: relative; flex: none; width: 16px; height: 16px; display: grid; place-items: center; }
 .act.cur { color: var(--txt); }
@@ -1189,8 +1189,9 @@ body.in-app .rs-dim { opacity: 1; }
 .acts-btn { display: inline-flex; align-items: center; gap: 8px; padding: 6px 11px; border-radius: 99px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; color: var(--dim); background: rgba(var(--a1), .08); border: 1px solid rgba(var(--a1), .28); transition: border-color .2s, color .2s, background .25s; }
 .acts-btn:hover, .acts-btn.open { color: var(--txt); border-color: var(--cyan); }
 .acts-btn .ic { width: 14px; height: 14px; } .acts-btn .chev { transition: transform .45s cubic-bezier(.3, 1.25, .4, 1); } .acts-btn.open .chev { transform: rotate(180deg); }
-.acts-sum .acts { margin: 8px 0 4px 4px; }
+.acts-sum .steps { margin: 8px 0 4px 4px; }
 .srcs { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
 .srcs a { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px 4px 5px; border-radius: 99px; font-size: 12px; text-decoration: none; color: var(--dim); background: rgba(var(--deep), .5); border: 1px solid var(--line2); animation: lpUp .45s cubic-bezier(.2, .9, .25, 1) both; transition: border-color .2s, color .2s, transform .2s; }
 .srcs a:hover { color: #fff; border-color: var(--cyan); transform: translateY(-1px); }
 .srcs .s-n { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; font-size: 10.5px; font-weight: 700; color: #0b0220; background: linear-gradient(135deg, var(--cyan), var(--mag)); }
+.chat-item { min-height: 46px; box-sizing: border-box; }

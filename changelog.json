@@ -1,5 +1,17 @@
 [
   {
+    "version": "2.2.2",
+    "date": "21 November 2026",
+    "title": "NEON AI V2.2.2",
+    "tag": "Fix",
+    "items": [
+      {
+        "icon": "🔧",
+        "text": "<b>Chat list.</b> Fixed the chat you hover over growing taller than the others. All rows are the same size now."
+      }
+    ]
+  },
+  {
     "version": "2.2.1",
     "date": "21 November 2026",
     "title": "NEON AI V2.2.1",
