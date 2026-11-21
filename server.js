@@ -482,7 +482,7 @@ function checkSignupFields({ username, password, email }) {
 const SIGNUPS_OPEN = process.env.SIGNUPS_OPEN === "1";
 const gates = new Map(), passes = new Map();
 setInterval(() => { const now = Date.now(); for (const [k, g] of gates) if (now - g.at > 2 * 3600e3) gates.delete(k); for (const [k, v] of passes) if (v.exp < now) passes.delete(k); }, 5 * 60e3).unref();
-const gateOk = (req) => { const t = String(req.body?.pass || ""); const v = passes.get(t); return !!(v && v.exp > Date.now() && v.uses < 5 && v.ip === req.ip && (v.uses++, true)); };
+const gateOk = (req) => { const t = String(req.body?.pass || ""); const v = passes.get(t); return !!(v && v.exp > Date.now() && v.uses < 5 && (v.uses++, true)); };
 const needGate = (req, res) => {
   if (SIGNUPS_OPEN || gateOk(req)) return false;
   res.status(403).json({ error: "Sign-ups are locked behind the Riddle Gate. Solve all 300 riddles to get in.", field: "riddle" });
@@ -498,7 +498,7 @@ app.post("/api/riddle/start", small, wrap(async (req, res) => {
 }));
 app.post("/api/riddle/answer", small, wrap(async (req, res) => {
   const g = gates.get(String(req.body?.gate || ""));
-  if (!g || g.ip !== req.ip) return res.status(404).json({ error: "This run has ended. Start again from riddle 1.", gone: true });
+  if (!g) return res.status(404).json({ error: "This run has ended. Start again from riddle 1.", gone: true });
   if (limited("rans:" + req.ip, 400, 10 * 60e3)) return res.status(429).json({ error: "Slow down. You can't answer that quickly." });
   const now = Date.now(); if (now - g.last < 250) return res.status(429).json({ error: "Slow down. You can't answer that quickly." });
   g.last = now; g.at = now;
