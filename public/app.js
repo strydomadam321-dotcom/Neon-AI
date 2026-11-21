@@ -203,7 +203,7 @@ async function openPaint() {
     const t = await api("/api/riddle/skip/start", { method: "POST", noAuthRedirect: true });
     if (t.open) { config.signupGate = false; goStep(2); return; }
     pd = { ticket: t.ticket, need: Math.round(t.ms / 1000), max: 0, player: null, timer: 0, wall: Date.now() };
-    pdSay(""); $("pdBar").style.width = "0"; $("pdTime").textContent = `0:00:00 / ${hms(pd.need)}`; $("pdSound").textContent = "Sound off";
+    pdSay(""); $("pdBar").style.width = "0"; $("pdTime").textContent = `0:00:00 / ${hms(pd.need)}`; $("pdSound").textContent = "Mute";
     const o = $("paintDry"); o.classList.remove("hidden", "out");
     await loadYT();
     if (!pd) return;
@@ -241,7 +241,7 @@ async function finishPaint() {
   }
 }
 $("rgHard").onclick = openPaint; $("pdQuit").onclick = stopPaint;
-$("pdSound").onclick = () => { const p = pd && pd.player; if (!p) return; try { if (p.isMuted()) { p.unMute(); $("pdSound").textContent = "Sound off"; } else { p.mute(); $("pdSound").textContent = "Sound on"; } } catch {} };
+$("pdSound").onclick = () => { const p = pd && pd.player; if (!p) return; try { if (p.isMuted()) { p.unMute(); $("pdSound").textContent = "Mute"; } else { p.mute(); $("pdSound").textContent = "Unmute"; } } catch {} };
 $("pdShield").addEventListener("contextmenu", (e) => e.preventDefault());
 $("fRiddle").addEventListener("animationend", () => $("fRiddle").classList.remove("bad"));
 addEventListener("beforeunload", (e) => { if ((pd || riddle.i > 0) && !riddle.pass && !$("auth").classList.contains("hidden")) { e.preventDefault(); e.returnValue = ""; } });   // leaving wipes the progress
