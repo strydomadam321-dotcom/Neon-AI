@@ -1205,3 +1205,20 @@ body.in-app .rs-dim { opacity: 1; }
 .rg-kind { display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; padding: 3px 9px; border-radius: 99px; color: #0b0220; background: linear-gradient(90deg, var(--cyan), var(--mag)); }
 .rg-text { margin: 10px 0 0; font-size: 16px; line-height: 1.5; color: #fff; }
 .rg-msg { min-height: 1.4em; margin: 8px 2px 0; font-size: 13px; color: var(--dim); transition: color .25s; } .rg-msg.good { color: var(--ok); } .rg-msg.bad { color: var(--bad); }
+
+/* ---------- Riddle Gate: a right answer turns the sun green for a moment ---------- */
+.rs-sun stop { transition: stop-color .22s ease; }
+.rs-sun svg { transition: filter .25s ease; }
+body.rg-win #sunG stop:nth-child(1) { stop-color: #eaffd6; } body.rg-win #sunG stop:nth-child(2) { stop-color: #7dff9a; } body.rg-win #sunG stop:nth-child(3) { stop-color: #19e68c; } body.rg-win #sunG stop:nth-child(4) { stop-color: #0a8f5a; }
+body.rg-win .rs-sun svg:first-child { filter: drop-shadow(0 0 70px rgba(61, 255, 148, .95)) saturate(1.2); }
+body.rg-win .rs-sun::after { background: radial-gradient(circle, rgba(61, 255, 148, .6), rgba(61, 255, 148, 0) 62%); opacity: 1; }
+@keyframes tickShow { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.6); } 25% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); } 70% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.04); } }
+@keyframes tickDraw { to { stroke-dashoffset: 0; } }
+#authCard.rg-win { animation: rgGlow .62s ease-out; }
+@keyframes rgGlow { 30% { box-shadow: 0 0 0 1px rgba(61, 255, 148, .7), 0 0 46px rgba(61, 255, 148, .45); } }
+#rgTick { position: fixed; z-index: 60; pointer-events: none; opacity: 0; transform: translate(-50%, -50%); }
+#rgTick svg { width: 100%; height: 100%; overflow: visible; }
+#rgTick path { fill: none; stroke: #9dffbf; stroke-width: 9; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 120; stroke-dashoffset: 120; filter: drop-shadow(0 0 6px #3dff94) drop-shadow(0 0 20px #19e68c) drop-shadow(0 0 44px #19e68c); }
+#rgTick.on { animation: tickShow .66s ease-out both; } #rgTick.on path { animation: tickDraw .32s cubic-bezier(.3, 1.2, .4, 1) both; }
+@keyframes tickShow { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.55); } 22% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); } 70% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.06); } }
+@keyframes tickDraw { to { stroke-dashoffset: 0; } }

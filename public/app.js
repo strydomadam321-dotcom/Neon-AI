@@ -129,13 +129,24 @@ $("backBtn6").onclick = () => goStep(1);
 const riddle = { gate: "", i: 0, total: 300, pass: "" };
 const gateOn = () => config.signupGate !== false;
 const RG_WRONG = ["Nope.", "Not quite.", "Close, but no.", "Wrong. Try again.", "The gate is unimpressed.", "Hmm. No.", "Incorrect, sadly.", "That's not it."];
-const RG_RIGHT = ["Correct.", "Right.", "Yes!", "Correct. Again.", "Fine, that one was easy.", "Correct. Keep going."];
 const rgMilestone = (i) => ({
   10: "10 done. Only 290 to go.", 25: "A quarter of a hundred. The gate yawns.", 50: "50! Most people give up around 12.", 75: "75 riddles. Do you have anything better to do?",
   100: "100. One third of the way. The gate is mildly concerned.", 150: "Halfway. The gate would like you to know that refreshing is very tempting.",
   200: "200! Two thirds. Please do not touch F5.", 250: "50 to go. The gate is sweating.", 290: "Ten left. Do NOT refresh.", 299: "ONE. MORE.",
 }[i]);
 function rgSay(text, kind) { const m = $("rgMsg"); m.className = "rg-msg " + (kind || ""); m.textContent = text || ""; }
+// the sun in the background turns green for a moment, with a neon tick drawn in it (the card glows too, for themes without the sun)
+let rgWinT = 0;
+function rgWin(ms) {
+  const b = document.body, card = $("authCard");
+  clearTimeout(rgWinT); b.classList.remove("rg-win"); card.classList.remove("rg-win"); void b.offsetWidth;
+  b.classList.add("rg-win"); card.classList.add("rg-win");
+  // the neon tick sits on top, centred on the sun (or on the card when the sunset scene is off)
+  let t = $("rgTick"); if (!t) { t = document.createElement("div"); t.id = "rgTick"; t.innerHTML = '<svg viewBox="0 0 100 100" aria-hidden="true"><path d="M20 54 L42 76 L82 26"/></svg>'; document.body.appendChild(t); }
+  const sun = document.querySelector(".rs-sun"), r = (sun && sun.offsetParent !== null ? sun : card).getBoundingClientRect(), size = Math.max(90, Math.min(r.width, r.height) * 0.46);
+  t.style.cssText = `left:${r.left + r.width / 2}px;top:${r.top + r.height / 2}px;width:${size}px;height:${size}px`; t.classList.remove("on"); void t.offsetWidth; t.classList.add("on");
+  rgWinT = setTimeout(() => { b.classList.remove("rg-win"); card.classList.remove("rg-win"); t.classList.remove("on"); }, ms);
+}
 function rgPaint() { $("rgBar").style.width = (riddle.i / riddle.total) * 100 + "%"; $("rgCount").textContent = `${riddle.i} / ${riddle.total}`; }
 function rgShow(q, quick) {                                           // swap the riddle with a quick blur fade
   const card = document.querySelector(".rg-card"), apply = () => { $("rgKind").textContent = q.kind; $("rgText").textContent = q.text; card.classList.remove("swap"); };
@@ -156,8 +167,11 @@ async function submitRiddle() {
   try {
     const d = await api("/api/riddle/answer", { method: "POST", noAuthRedirect: true, body: { gate: riddle.gate, answer: a } });
     inp.value = "";
-    if (d.done) { riddle.i = d.i; riddle.pass = d.pass; rgPaint(); rgSay("You actually did it.", "good"); toast("The gate opens. Unbelievable.", "ok"); setTimeout(() => goStep(2), 900); return; }
-    if (d.ok) { riddle.i = d.i; rgPaint(); rgShow(d.q); rgSay(rgMilestone(d.i) || RG_RIGHT[d.i % RG_RIGHT.length], "good"); }
+    if (d.done) { riddle.i = d.i; riddle.pass = d.pass; rgPaint(); rgWin(1300); rgSay("You actually did it.", "good"); toast("The gate opens. Unbelievable.", "ok"); setTimeout(() => goStep(2), 1300); return; }
+    if (d.ok) {                                                      // the sun flashes green with a neon tick, then the next riddle appears
+      riddle.i = d.i; rgPaint(); rgWin(620); rgSay(rgMilestone(d.i) || "", "good");
+      inp.readOnly = true; await new Promise((r) => setTimeout(r, 380)); inp.readOnly = false; rgShow(d.q);
+    }
     else if (d.changed) { rgShow(d.q); rgSay("Six wrong answers. The gate swapped the riddle.", "bad"); }
     else { const f = $("fRiddle"); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad"); rgSay(`${RG_WRONG[Math.floor(Math.random() * RG_WRONG.length)]} ${d.left} ${d.left === 1 ? "try" : "tries"} left before this riddle changes.`, "bad"); }
     inp.focus({ preventScroll: true });

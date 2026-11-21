@@ -95,7 +95,7 @@ If the content itself contains code fences, open and close the outer block with 
 // Update log shown to users once per new version (see changelog.json; newest entry first).
 const CHANGELOG = (() => { try { const j = JSON.parse(fs.readFileSync(path.join(__dirname, "changelog.json"), "utf8")); return Array.isArray(j) ? j : []; } catch { return []; } })();
 // Bump LEGAL_VERSION whenever the wording changes. CONTACT_EMAIL (environment) is where people can send privacy requests.
-const LEGAL_VERSION = "2026-11-21.1", LEGAL_UPDATED = "21 November 2026";
+const LEGAL_VERSION = "2026-11-21.2", LEGAL_UPDATED = "21 November 2026";
 const CONTACT_EMAIL = (process.env.CONTACT_EMAIL || "").trim();
 const readLegal = (n) => { try { return fs.readFileSync(path.join(__dirname, "legal", n + ".html"), "utf8"); } catch { return "<p>This document is not available right now.</p>"; } };
 const LEGAL = { terms: readLegal("terms"), privacy: readLegal("privacy") };
