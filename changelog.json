@@ -1,5 +1,21 @@
 [
   {
+    "version": "2.2",
+    "date": "21 November 2026",
+    "title": "NEON AI V2.2",
+    "tag": "New",
+    "items": [
+      {
+        "icon": "🌐",
+        "text": "<b>Web search for every model.</b> Gemini and Claude can now search the web, so they know about recent news, releases and prices, and they list their sources under the answer."
+      },
+      {
+        "icon": "🔎",
+        "text": "<b>See what it's doing.</b> Instead of just loading dots, you now see each step live: thinking, searching, reading sources. Open the summary above an answer to see what it looked up."
+      }
+    ]
+  },
+  {
     "version": "2.1",
     "date": "21 November 2026",
     "title": "NEON AI V2.1",

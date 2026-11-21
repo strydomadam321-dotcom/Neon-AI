@@ -56,3 +56,7 @@
 
 ## Maths
 - `md()` in `public/app.js` pulls `$...$`, `$$...$$`, `\(...\)` and `\[...\]` out of the text (never from code), lets marked/DOMPurify handle the rest, then puts KaTeX output back (KaTeX from cdnjs in `index.html`). `MATH_RULES` in `server.js` tells the models to write LaTeX. Chess piece CSS is scoped under `.ch-pieces` (a bare `.cp` rule once broke the code-block Copy button).
+
+## Web search and live activity
+- Every chat model can search the web: Gemini uses the `google_search` grounding tool (`geminiStream`), Claude the `web_search_20250305` server tool (`/api/chat`). If a provider rejects the tool the request is retried without it and search stays off for that model for 10 minutes (`noSearch`). `liveRules()` puts today's date and a "search before saying something isn't out" rule into every system prompt.
+- The SSE stream carries `{act:{k:"search"|"query"|"read"}}` and `{src:[{t,u}]}` besides `{t}` text. `streamReply()` in `public/app.js` shows them as live steps (Thinking, Searching the web for "...", Reading N sources); a finished message stores `acts` and `sources` and shows a collapsible "Searched the web" summary plus source chips (`actsSummary`, `sourceChips`). Gemini only reports its searches at the end of the answer, Claude reports them live.

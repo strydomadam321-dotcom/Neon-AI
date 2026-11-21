@@ -75,6 +75,13 @@ const CODE_MS = 10 * 60e3, RESEND_COOLDOWN_MS = 30e3, MAX_CODE_TRIES = 5;
 
 // Appended to every system prompt (also the user's own custom instructions): how the model hands over real files
 const MATH_RULES = `MATHS: write any mathematics in LaTeX, never as plain text. Inline maths goes between single dollar signs like $x^2 + 1$ and displayed equations go on their own lines between double dollar signs like $$\\frac{a}{b}$$. Do not put LaTeX inside code blocks, and write money as plain text such as 5 dollars or \\$5.`;
+// every model gets today's date and is told it can search the web (its own training knowledge is out of date)
+const liveRules = () => `TODAY: the current date is ${new Date().toISOString().slice(0, 10)} (UTC). You have a web search tool. Use it whenever the question could depend on recent or changing facts (news, releases, prices, sports, software versions, "latest", "is X out yet") or when you are not sure. Your training data ends before today, so never claim that something has not happened, or is unreleased, without searching first. After searching, answer from what you found and mention the source names naturally.`;
+// search tools that a provider rejected are switched off for a while so chats keep working
+const noSearch = new Map();
+const searchOff = (id) => (noSearch.get(id) || 0) > Date.now();
+const markNoSearch = (id) => noSearch.set(id, Date.now() + 10 * 60e3);
+const webSrc = (arr) => arr.map((w) => ({ t: String((w && (w.title || w.page_age)) || "").slice(0, 90), u: String((w && (w.uri || w.url)) || "") })).filter((x) => /^https?:\/\//.test(x.u)).slice(0, 8);
 const FILE_RULES = `FILES: you can hand the user real, downloadable files. When they ask for a PDF, a Word document (.docx), a PowerPoint (.pptx), or an Excel / Google Sheets spreadsheet (.xlsx), or one of those is clearly the best deliverable, write one short sentence and then ONE fenced code block whose language is neon-pdf, neon-docx, neon-pptx or neon-xlsx. The app turns the block into a file with a preview and a download button, so never tell the user to copy, print, save as HTML or paste it into another program.
 Block layout: optional header lines first (title: My Title, and for neon-pptx optionally theme: dark), then the content.
 - neon-pdf and neon-docx: the whole document in Markdown (# headings, paragraphs, **bold**, *italic*, lists, tables, > quotes, --- rules). No HTML.
@@ -1014,7 +1021,8 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
     return { role: "user", parts };
   });
 
-  let sentText = false, tokens = 0, seg = "", maxOut = learnedGeminiMax.get(model) || 65536;
+  let sentText = false, tokens = 0, seg = "", maxOut = learnedGeminiMax.get(model) || 65536, useSearch = !searchOff(model);
+  const seenQ = new Set(); let seenSrc = 0;
   async function attempt(withThinking) {
     const generationConfig = { maxOutputTokens: maxOut };
     const th = withThinking ? geminiThinking(model, effort) : null;
@@ -1022,7 +1030,7 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
     const r = await fetch(`${GEMINI_BASE}/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
       method: "POST", signal,
       headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
-      body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig }),
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig, ...(useSearch ? { tools: [{ google_search: {} }] } : {}) }),
     });
     if (!r.ok) {
       let msg = ""; try { msg = (await r.json())?.error?.message || ""; } catch {}
@@ -1043,6 +1051,12 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
           if (p.thought) { send({ th: 1 }); continue; }
           if (typeof p.text === "string" && p.text) { sentText = true; seg += p.text; send({ t: p.text }); }
         }
+        const gm = cand?.groundingMetadata;
+        if (gm) {
+          for (const sq of gm.webSearchQueries || []) if (sq && !seenQ.has(sq)) { seenQ.add(sq); send({ act: { k: "search" } }); send({ act: { k: "query", q: String(sq).slice(0, 120) } }); }
+          const web = webSrc((gm.groundingChunks || []).map((c) => c.web).filter(Boolean));
+          if (web.length && web.length !== seenSrc) { seenSrc = web.length; send({ act: { k: "read", n: web.length } }); send({ src: web }); }
+        }
         if (cand?.finishReason) finish = cand.finishReason;
       }
     }
@@ -1054,6 +1068,7 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
     for (let k = 0; k < 3; k++) {
       try { return await attempt(withThinking); }
       catch (e) {
+        if (useSearch && !sentText && e.status >= 400 && e.status < 500 && e.status !== 401 && /search|ground|tool|quota|exhaust/i.test(e.message)) { useSearch = false; markNoSearch(model); continue; }   // search not available: carry on without it
         if (e.status === 400 && !sentText && /max.?output.?tokens|output token|out of range|exceeds?/i.test(e.message) && !/api key/i.test(e.message) && maxOut > 8192) { maxOut = maxOut > 40000 ? 32000 : Math.floor(maxOut / 2); learnedGeminiMax.set(model, maxOut); continue; }
         throw e;
       }
@@ -1090,7 +1105,7 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
     .slice(-40);
   while (history.length && history[0].role !== "user") history.shift();
   if (!history.length) return res.status(400).json({ error: "No messages" });
-  const system = (String(req.user.settings?.system || "").trim().slice(0, 4000) || SYSTEM) + "\n\n" + MATH_RULES + "\n\n" + FILE_RULES;
+  const system = (String(req.user.settings?.system || "").trim().slice(0, 4000) || SYSTEM) + "\n\n" + liveRules() + "\n\n" + MATH_RULES + "\n\n" + FILE_RULES;
 
   const plan = effectivePlan(req.user);
   const use = await todayUsage(req.user.id);
@@ -1133,10 +1148,20 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
           max_tokens: cap,
           system,
           ...(thinking ? { thinking: { type: "enabled", budget_tokens: budget } } : {}),
+          ...(searchOff(info.id) ? {} : { tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }] }),
           messages: [...history.map((m) => ({ role: m.role, content: toContent(m) })), ...extra],
         });
         stream.on("text", (t) => { gotText = true; acc += t; send({ t }); });
-        stream.on("streamEvent", (e) => { if (e.type === "content_block_start" && e.content_block?.type === "thinking") send({ th: 1 }); });
+        const tb = {};
+        stream.on("streamEvent", (e) => {
+          const b = e.content_block;
+          if (e.type === "content_block_start") {
+            if (b?.type === "thinking") send({ th: 1 });
+            else if (b?.type === "server_tool_use") { tb[e.index] = ""; send({ act: { k: "search" } }); }
+            else if (b?.type === "web_search_tool_result") { const rs = webSrc(Array.isArray(b.content) ? b.content.filter((x) => x.type === "web_search_result") : []); if (rs.length) { send({ act: { k: "read", n: rs.length } }); send({ src: rs }); } }
+          } else if (e.type === "content_block_delta" && tb[e.index] !== undefined && e.delta?.type === "input_json_delta") tb[e.index] += e.delta.partial_json || "";
+          else if (e.type === "content_block_stop" && tb[e.index] !== undefined) { let sq = ""; try { sq = JSON.parse(tb[e.index] || "{}").query || ""; } catch {} delete tb[e.index]; if (sq) send({ act: { k: "query", q: String(sq).slice(0, 120) } }); }
+        });
         return stream.finalMessage();
       };
       // if the API says the model allows fewer output tokens than we asked for, remember its number and go again
@@ -1156,11 +1181,19 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
         return run(thinking, extra);
       };
       let final;
-      try { final = await runSafe(cfg.budget > 0, []); }
-      catch (e) {
-        // if the model rejects the thinking settings, retry once without them
-        if (cfg.budget > 0 && e?.status === 400 && !gotText && !res.writableEnded) final = await runSafe(false, []); else throw e;
-      }
+      const toolErr = (e) => e?.status === 400 && /web.?search|tool/i.test(String(e?.message || ""));
+      const attemptAll = async () => {
+        try { return await runSafe(cfg.budget > 0, []); }
+        catch (e) {
+          // if the model rejects the thinking settings, retry once without them
+          if (cfg.budget > 0 && e?.status === 400 && !gotText && !res.writableEnded && !toolErr(e)) return runSafe(false, []);
+          throw e;
+        }
+      };
+      try { final = await attemptAll(); }
+      catch (e) { if (toolErr(e) && !gotText && !searchOff(info.id)) { markNoSearch(info.id); final = await attemptAll(); } else throw e; }
+      // a long web search can pause the turn: hand the work back so the model carries on
+      for (let n = 0; n < 4 && final.stop_reason === "pause_turn"; n++) final = await runSafe(false, [{ role: "assistant", content: final.content }]);
       // hit the output limit: carry on automatically and stitch the parts together (no thinking, so all of it goes into the answer)
       for (let n = 0; n < MAX_CONTINUES && final.stop_reason === "max_tokens" && acc.trim(); n++) {
         final = await runSafe(false, [{ role: "assistant", content: acc.replace(/\s+$/, "") }, { role: "user", content: CONT_PROMPT }]);

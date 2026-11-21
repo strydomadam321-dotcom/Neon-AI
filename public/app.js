@@ -730,6 +730,36 @@ function injectMath(html, found) {
     return f.display ? `<div class="math-block">${r}</div>` : r;
   });
 }
+// ---------- what the AI did while answering (web searches, sources) ----------
+const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
+function actRow(a, done) {
+  const d = document.createElement("div");
+  d.className = "act " + (done ? "done" : "cur"); d.dataset.k = a.k;
+  d.innerHTML = '<span class="act-i"></span><span class="act-t"></span>';
+  d.querySelector(".act-t").textContent = a.t;
+  return d;
+}
+function actsSummary(m) {
+  const qs = m.acts.filter((a) => a.k === "search").length, reads = m.acts.find((a) => a.k === "read");
+  const wrap = document.createElement("div"); wrap.className = "acts-sum";
+  const label = `Searched the web${qs > 1 ? " " + qs + " times" : ""}${m.sources?.length ? " · " + m.sources.length + " sources" : reads ? " · " + reads.t.replace(/^Reading /, "") : ""}`;
+  wrap.innerHTML = `<button type="button" class="acts-btn">${icon("search")}<span></span>${icon("chev", "chev")}</button><div class="collapse"><div class="collapse-in"><div class="acts"></div></div></div>`;
+  wrap.querySelector(".acts-btn span").textContent = label;
+  const list = wrap.querySelector(".acts"); m.acts.forEach((a) => list.appendChild(actRow(a, true)));
+  wrap.querySelector(".acts-btn").onclick = (e) => { const open = wrap.querySelector(".collapse").classList.toggle("open"); e.currentTarget.classList.toggle("open", open); };
+  return wrap;
+}
+function sourceChips(src) {
+  const box = document.createElement("div"); box.className = "srcs";
+  src.slice(0, 8).forEach((s, i) => {
+    if (!/^https?:\/\//.test(s.u)) return;
+    const a = document.createElement("a"); a.href = s.u; a.target = "_blank"; a.rel = "noopener noreferrer"; a.style.animationDelay = i * 0.05 + "s";
+    a.innerHTML = '<span class="s-n"></span><span class="s-h"></span>'; a.querySelector(".s-n").textContent = i + 1;
+    a.querySelector(".s-h").textContent = (s.t && !/^https?:/.test(s.t) ? s.t : hostOf(s.u)).slice(0, 40); a.title = s.u;
+    box.appendChild(a);
+  });
+  return box;
+}
 function md(text, live = false) {
   const mx = extractMath(text);
   const html = injectMath(DOMPurify.sanitize(marked.parse(mx.text)), mx.found);
@@ -906,7 +936,9 @@ function msgEl(m, idx, chat = current) {
     body.appendChild(bubble);
   } else {
     if (m.text) bubble.appendChild(md(m.text));
+    if (m.acts?.length) body.appendChild(actsSummary(m));
     body.appendChild(bubble);
+    if (m.sources?.length) body.appendChild(sourceChips(m.sources));
     if (m.err) body.appendChild(errBlock(m.err, m, chat));
     const act = document.createElement("div");
     act.className = "actions";
@@ -996,7 +1028,17 @@ async function streamReply() {
   row.querySelector(".actions")?.remove();
   row.classList.add("streaming");
   const bubble = row.querySelector(".bubble");
-  bubble.innerHTML = '<div class="thinking"><i></i><i></i><i></i></div>';
+  const actsEl = document.createElement("div"); actsEl.className = "acts live";
+  const acts = [], sources = []; let searched = false;
+  const finishCur = () => actsEl.querySelectorAll(".act.cur").forEach((r) => { r.classList.remove("cur"); r.classList.add("done"); });
+  const addAct = (k, t) => {                                   // a new step: the one before it is finished
+    finishCur(); const a = { k, t }; acts.push(a);
+    const r = actRow(a, !!text); actsEl.appendChild(r);
+    if (k !== "think") searched = true;
+    if (bubble.isConnected && !text) { bubble.innerHTML = ""; bubble.appendChild(actsEl); scrollDown(); }
+  };
+  actsEl.appendChild(actRow({ k: "think", t: "Thinking" }, false));
+  bubble.innerHTML = ""; bubble.appendChild(actsEl);
   els.msgs.appendChild(row);
   els.empty.style.display = "none";
   scrollDown(true);
@@ -1007,6 +1049,7 @@ async function streamReply() {
     raf = 0;
     if (current !== chat) return;
     bubble.innerHTML = "";
+    if (searched) { finishCur(); bubble.appendChild(actsEl); } else if (actsEl.isConnected) actsEl.remove();   // plain answers just show the text; searches stay listed above it
     const d = md(text, true); d.classList.add("cursor");
     bubble.appendChild(d);
     scrollDown();
@@ -1034,7 +1077,13 @@ async function streamReply() {
         if (!line.startsWith("data:")) continue;
         const ev = JSON.parse(line.slice(5));
         if (ev.t) { text += ev.t; if (!raf) raf = requestAnimationFrame(paint); }
-        if (ev.th && !text) { const lb = bubble.querySelector(".thinking"); if (lb && !lb.dataset.l) { lb.dataset.l = 1; lb.insertAdjacentHTML("beforeend", '<span class="think-lbl">Thinking</span>'); } }
+        if (ev.act) {
+          const a = ev.act;
+          if (a.k === "search") addAct("search", "Searching the web");
+          else if (a.k === "query") { const last = [...actsEl.querySelectorAll('.act[data-k="search"]')].pop(), ar = [...acts].reverse().find((x) => x.k === "search"); if (ar) { ar.t = "Searching the web for “" + a.q + "”"; if (last) last.querySelector(".act-t").textContent = ar.t; } }
+          else if (a.k === "read") addAct("read", "Reading " + a.n + " source" + (a.n === 1 ? "" : "s"));
+        }
+        if (ev.src) ev.src.forEach((s) => { if (s.u && !sources.some((x) => x.u === s.u)) sources.push(s); });
         if (ev.error) errMsg = ev.error;
         if (ev.tokens != null) { plan.usedTokens = ev.tokens; renderPlanSettings(); }
       }
@@ -1045,7 +1094,7 @@ async function streamReply() {
   if (raf) cancelAnimationFrame(raf);
   setBusy(false); abortCtl = null;
   if (!user) return;
-  if (text || errMsg) chat.messages.push({ role: "assistant", text, ...(errMsg ? { err: errMsg, errModel: usedModel } : {}) });
+  if (text || errMsg) chat.messages.push({ role: "assistant", text, ...(errMsg ? { err: errMsg, errModel: usedModel } : {}), ...(searched && acts.length ? { acts: acts.map((a) => ({ k: a.k, t: a.t.replace(/^Searching the web for/, "Searched the web for") })), sources: sources.slice(0, 8) } : {}) });
   if (text && !errMsg && config.models.find((m) => m.id === usedModel)?.provider === "claude") { plan.usedClaude++; renderUsage(); }
   const saved = await persist(chat);
   if (current === chat) renderMessages();
