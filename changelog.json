@@ -1,5 +1,17 @@
 [
   {
+    "version": "2.2.4",
+    "date": "21 November 2026",
+    "title": "NEON AI V2.2.4",
+    "tag": "Fix",
+    "items": [
+      {
+        "icon": "⚡",
+        "text": "<b>Faster answers.</b> Everyday messages are answered straight away again, and the web is only searched when your question needs fresh info. If a Gemini model stops responding, NEON AI now moves on to the next one after a few seconds instead of hanging."
+      }
+    ]
+  },
+  {
     "version": "2.2.3",
     "date": "21 November 2026",
     "title": "NEON AI V2.2.3",

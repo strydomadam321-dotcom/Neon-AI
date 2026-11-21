@@ -1009,6 +1009,7 @@ function geminiThinking(id, effort) {
 }
 
 const LEAK_RE = /^\s*(?:```(?:json)?\s*)?\{[^{}]*"search_queries"[^{}]*\}\s*(?:```\s*(?:userData|json|text)?\s*)?/i;
+const FIRST_BYTE_MS = Number(process.env.GEMINI_FIRST_BYTE_MS) || 25000;   // how long a model may stay silent before the next one is tried
 async function geminiStream({ model, history, system, effort, send, signal, final = true, st = {}, noTools = false }) {
   const contents = history.map((m) => {
     if (m.role === "assistant") return { role: "model", parts: [{ text: m.text }] };
@@ -1024,12 +1025,12 @@ async function geminiStream({ model, history, system, effort, send, signal, fina
 
   let sentText = false, tokens = 0, seg = "", maxOut = learnedGeminiMax.get(model) || 65536, useSearch = !noTools && !searchOff(model);
   const seenQ = new Set(); let seenSrc = 0;
-  async function attempt(withThinking) {
+  async function attemptRun(withThinking, sig, touch) {
     const generationConfig = { maxOutputTokens: maxOut };
     const th = withThinking ? geminiThinking(model, effort) : null;
     if (th) generationConfig.thinkingConfig = th;
     const r = await fetch(`${GEMINI_BASE}/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
-      method: "POST", signal,
+      method: "POST", signal: sig,
       headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
       body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig, ...(useSearch ? { tools: [{ google_search: {} }] } : {}) }),
     });
@@ -1051,6 +1052,7 @@ async function geminiStream({ model, history, system, effort, send, signal, fina
     };
     const flush = () => { if (holding === true && hold) { const h = clean(hold); hold = ""; holding = false; out(h); } };
     for await (const chunk of r.body) {
+      touch(40000);
       buf += dec.decode(chunk, { stream: true });
       let i;
       while ((i = buf.indexOf("\n")) >= 0) {
@@ -1076,6 +1078,13 @@ async function geminiStream({ model, history, system, effort, send, signal, fina
     flush();
     tokens += reqTotal;                                   // each request is billed on its own (continuations re-send the earlier text)
     return { finish, blocked };
+  }
+  async function attempt(withThinking) {
+    const ac = new AbortController(); let timer = setTimeout(() => ac.abort(), FIRST_BYTE_MS);
+    const touch = (ms) => { clearTimeout(timer); timer = setTimeout(() => ac.abort(), ms); };
+    try { return await attemptRun(withThinking, signal ? AbortSignal.any([signal, ac.signal]) : ac.signal, touch); }
+    catch (e) { if (ac.signal.aborted && !signal?.aborted) throw Object.assign(new Error("Gemini took too long to answer."), { status: 504, provider: "gemini" }); throw e; }
+    finally { clearTimeout(timer); }
   }
   // an output-size error means this model allows less than we asked for: remember the smaller number and retry
   async function attemptSafe(withThinking) {
@@ -1113,6 +1122,7 @@ async function geminiStream({ model, history, system, effort, send, signal, fina
 const RESEARCH_MODELS = ["gemini-2.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"];
 const viaHelper = new Map();                                        // model id -> time until which it uses the helper
 const usesHelper = (id) => /lite/i.test(id) || (viaHelper.get(id) || 0) > Date.now();   // Lite models do not search well on their own
+const needsWeb = (t) => /\b(latest|newest|recent|recently|today|tonight|yesterday|tomorrow|this (week|month|year|season)|right now|currently|current|news|releases?d?|out yet|launch(ed)?|prices?|cost of|how much|scores?|won|winner|wins|standings|rank(ed|ing|ings)?|rated|ratings?|reviews?|best|top \d+|weather|forecast|stocks?|crypto|bitcoin|exchange rate|versions?|updates?d?|202[5-9]|who is the|what happened|search|google|look ?up|online|internet|web)\b/i.test(String(t || ""));
 async function geminiResearch({ history, send, signal }) {
   const out = { notes: "", tokens: 0 };
   const rm = RESEARCH_MODELS.find((id) => MODELS.some((m) => m.id === id));
@@ -1120,8 +1130,9 @@ async function geminiResearch({ history, send, signal }) {
   const talk = history.slice(-6).map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${String(m.text || "").slice(0, 1500)}`).join("\n");
   const system = `You are a research assistant with web search. Today is ${new Date().toISOString().slice(0, 10)} (UTC). Read the conversation and search the web for anything in the user's latest message that depends on recent or changing facts (news, releases, prices, scores, versions, reviews). Reply with concise research notes (at most 350 words): the key facts with dates and numbers, and the names of the sources. If the latest message needs no web search at all (chit-chat, maths, coding, creative writing, general knowledge that does not change), reply with exactly NO_SEARCH.`;
   try {
+    send({ act: { k: "search" } });                                   // shows "Searching the web" while the helper works
     const r = await fetch(`${GEMINI_BASE}/v1beta/models/${encodeURIComponent(rm)}:generateContent`, {
-      method: "POST", signal: AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(40000)]) : signal,
+      method: "POST", signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]),
       headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
       body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: talk }] }], tools: [{ google_search: {} }], generationConfig: { maxOutputTokens: 1200, temperature: 0.2 } }),
     });
@@ -1132,7 +1143,7 @@ async function geminiResearch({ history, send, signal }) {
     if (!text || /^NO_SEARCH\b/.test(text)) return out;
     out.notes = text.slice(0, 4000);
     const gm = cand?.groundingMetadata;
-    for (const sq of gm?.webSearchQueries || []) { send({ act: { k: "search" } }); send({ act: { k: "query", q: String(sq).slice(0, 120) } }); }
+    for (const sq of gm?.webSearchQueries || []) send({ act: { k: "query", q: String(sq).slice(0, 120) } });
     const web = webSrc((gm?.groundingChunks || []).map((c) => c.web).filter(Boolean));
     if (web.length) { send({ act: { k: "read", n: web.length } }); send({ src: web }); }
   } catch (e) { if (e?.name === "AbortError" && signal?.aborted) throw e; }
@@ -1183,13 +1194,15 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
       // A model that answers nothing when it searches by itself gets its web results from a research helper instead.
       const chain = [info.id, ...["gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-3.6-flash"].filter((id) => id !== info.id && MODELS.some((m) => m.id === id))];
       let used = 0, ok = false, lastErr = null;
+      const lastUser = [...history].reverse().find((m) => m.role === "user")?.text || "";
+      let research = null;                                           // made at most once per message, then reused by every model tried
       const tryModel = async (id, helper) => {
         const st = {};
         try {
           let sys = system;
-          if (helper) {
-            const rs = await geminiResearch({ history, send, signal: ctl.signal }); used += rs.tokens;
-            if (rs.notes) sys += "\n\nWEB RESEARCH (fresh results from a live web search made just now; rely on them over your memory, and mention the source names naturally):\n" + rs.notes;
+          if (helper && needsWeb(lastUser)) {
+            if (!research) { research = await geminiResearch({ history, send, signal: ctl.signal }); used += research.tokens; }
+            if (research.notes) sys += "\n\nWEB RESEARCH (fresh results from a live web search made just now; rely on them over your memory, and mention the source names naturally):\n" + research.notes;
           }
           used += await geminiStream({ model: id, history, system: sys, effort, send, signal: ctl.signal, final: false, st, noTools: helper });
         } catch (e) { e.sent = !!st.sent; throw e; }
