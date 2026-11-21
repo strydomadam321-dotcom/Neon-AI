@@ -1008,6 +1008,7 @@ function geminiThinking(id, effort) {
   return { thinkingBudget: budget };
 }
 
+const LEAK_RE = /^\s*(?:```(?:json)?\s*)?\{[^{}]*"search_queries"[^{}]*\}\s*(?:```\s*(?:userData|json|text)?\s*)?/i;
 async function geminiStream({ model, history, system, effort, send, signal, final = true, st = {}, noTools = false }) {
   const contents = history.map((m) => {
     if (m.role === "assistant") return { role: "model", parts: [{ text: m.text }] };
@@ -1037,6 +1038,18 @@ async function geminiStream({ model, history, system, effort, send, signal, fina
       const e = new Error(msg || `Gemini error ${r.status}`); e.status = r.status; e.provider = "gemini"; e.hadThinking = !!th; throw e;
     }
     const dec = new TextDecoder(); let buf = "", finish = "", blocked = "", reqTotal = 0;
+    // Some models write their own search request as text ({"search_queries": [...]} then a "userData" fence) before the real
+    // answer. An answer that opens with "{" or a code fence is held back for a moment so that junk can be cut off.
+    let hold = "", holding = null;
+    const out = (t) => { if (!t) return; sentText = true; st.sent = true; seg += t; send({ t }); };
+    const clean = (t) => t.replace(LEAK_RE, "");
+    const gate = (t) => {
+      if (holding === false) return out(t);
+      hold += t;
+      if (holding === null) { if (!/^\s*(\{|```)/.test(hold)) { holding = false; const h = hold; hold = ""; return out(h); } holding = true; }
+      if (hold.length >= 600) { holding = false; const h = clean(hold); hold = ""; out(h); }
+    };
+    const flush = () => { if (holding === true && hold) { const h = clean(hold); hold = ""; holding = false; out(h); } };
     for await (const chunk of r.body) {
       buf += dec.decode(chunk, { stream: true });
       let i;
@@ -1049,7 +1062,7 @@ async function geminiStream({ model, history, system, effort, send, signal, fina
         const cand = j.candidates?.[0];
         for (const p of cand?.content?.parts || []) {
           if (p.thought) { send({ th: 1 }); continue; }
-          if (typeof p.text === "string" && p.text) { sentText = true; st.sent = true; seg += p.text; send({ t: p.text }); }
+          if (typeof p.text === "string" && p.text) gate(p.text);
         }
         const gm = cand?.groundingMetadata;
         if (gm) {
@@ -1060,6 +1073,7 @@ async function geminiStream({ model, history, system, effort, send, signal, fina
         if (cand?.finishReason) finish = cand.finishReason;
       }
     }
+    flush();
     tokens += reqTotal;                                   // each request is billed on its own (continuations re-send the earlier text)
     return { finish, blocked };
   }
@@ -1098,7 +1112,7 @@ async function geminiStream({ model, history, system, effort, send, signal, fina
 // searching and writes short research notes (with sources), and the chosen model writes the answer from them.
 const RESEARCH_MODELS = ["gemini-2.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"];
 const viaHelper = new Map();                                        // model id -> time until which it uses the helper
-const usesHelper = (id) => (viaHelper.get(id) || 0) > Date.now();
+const usesHelper = (id) => /lite/i.test(id) || (viaHelper.get(id) || 0) > Date.now();   // Lite models do not search well on their own
 async function geminiResearch({ history, send, signal }) {
   const out = { notes: "", tokens: 0 };
   const rm = RESEARCH_MODELS.find((id) => MODELS.some((m) => m.id === id));

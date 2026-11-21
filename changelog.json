@@ -1,5 +1,17 @@
 [
   {
+    "version": "2.2.3",
+    "date": "21 November 2026",
+    "title": "NEON AI V2.2.3",
+    "tag": "Fix",
+    "items": [
+      {
+        "icon": "🔧",
+        "text": "<b>Cleaner search answers.</b> Fixed web-search answers sometimes starting with a box of raw code. Gemini 3.5 Flash-Lite now gets its web results in a more reliable way."
+      }
+    ]
+  },
+  {
     "version": "2.2.2",
     "date": "21 November 2026",
     "title": "NEON AI V2.2.2",
