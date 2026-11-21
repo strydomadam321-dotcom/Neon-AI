@@ -1222,3 +1222,13 @@ body.rg-win .rs-sun::after { background: radial-gradient(circle, rgba(61, 255, 1
 #rgTick.on { animation: tickShow .66s ease-out both; } #rgTick.on path { animation: tickDraw .32s cubic-bezier(.3, 1.2, .4, 1) both; }
 @keyframes tickShow { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.55); } 22% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); } 70% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.06); } }
 @keyframes tickDraw { to { stroke-dashoffset: 0; } }
+
+/* ---------- "This is too hard": watching paint dry ---------- */
+.rg-hard { display: block; margin: 12px auto 0; font-size: 13px; }
+#paintDry { z-index: 70; } #paintDry.out { animation: fadeout .25s both; } #paintDry.out .pd-card { animation: menuout .25s ease-in both; }
+.pd-card { width: min(740px, 100%); padding: 20px 22px 18px; animation: popIn .5s cubic-bezier(.3, 1.25, .4, 1) both; }
+.pd-card h3 { margin: 0 0 6px; font-size: 22px; } .pd-sub { margin: 0 0 12px; color: var(--dim); font-size: 14px; line-height: 1.5; } .pd-sub b { color: #fff; }
+.pd-video { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: #000; box-shadow: 0 0 0 1px var(--line2), 0 0 40px rgba(var(--a1), .15); }
+.pd-video iframe, .pd-video #pdPlayer { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.pd-shield { position: absolute; inset: 0; z-index: 2; cursor: not-allowed; }
+.pd-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }

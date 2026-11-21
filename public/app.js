@@ -128,7 +128,7 @@ $("backBtn6").onclick = () => goStep(1);
 // ---------- the Riddle Gate: sign-ups are closed behind 300 riddles; the progress lives only in this page's memory ----------
 const riddle = { gate: "", i: 0, total: 300, pass: "" };
 const gateOn = () => config.signupGate !== false;
-const RG_WRONG = ["Nope.", "Not quite.", "Close, but no.", "Wrong. Try again.", "The gate is unimpressed.", "Hmm. No.", "Incorrect, sadly.", "That's not it."];
+const RG_WRONG = ["Nope.", "Not quite.", "Close, but no.", "Wrong. Try again.", "The gate is unimpressed.", "Hmm. No.", "That's not it."];
 const rgMilestone = (i) => ({
   10: "10 done. Only 290 to go.", 25: "A quarter of a hundred. The gate yawns.", 50: "50! Most people give up around 12.", 75: "75 riddles. Do you have anything better to do?",
   100: "100. One third of the way. The gate is mildly concerned.", 150: "Halfway. The gate would like you to know that refreshing is very tempting.",
@@ -180,8 +180,71 @@ async function submitRiddle() {
     else rgSay(e.message, "bad");
   } finally { authEls.btn.disabled = false; }
 }
+// ---------- "This is too hard": ten hours of paint drying (a YouTube embed with no controls; the server only counts it after 10 real hours) ----------
+const PD_VIDEO = "QUGfOBw3LhU";                                     // "Paint Drying 10 Hours"
+let pd = null, ytReady = null;
+const hms = (s) => { s = Math.max(0, Math.floor(s)); return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; };
+function loadYT() {
+  return (ytReady = ytReady || new Promise((res, rej) => {
+    if (window.YT && window.YT.Player) return res();
+    const prev = window.onYouTubeIframeAPIReady; window.onYouTubeIframeAPIReady = () => { if (prev) prev(); res(); };
+    const s = document.createElement("script"); s.src = "https://www.youtube.com/iframe_api"; s.onerror = () => { ytReady = null; rej(new Error("Couldn't load the video player. Check your connection.")); }; document.head.appendChild(s);
+  }));
+}
+function pdSay(t, kind) { const m = $("pdMsg"); m.className = "rg-msg " + (kind || ""); m.textContent = t || ""; }
+function stopPaint() {
+  if (!pd) return; clearInterval(pd.timer); try { pd.player && pd.player.destroy(); } catch {}
+  pd = null; const o = $("paintDry"); o.classList.add("out"); setTimeout(() => { if (!pd) { o.classList.add("hidden"); o.classList.remove("out"); $("pdPlayer").outerHTML = '<div id="pdPlayer"></div>'; } }, 260);
+}
+async function openPaint() {
+  if (pd) return;
+  const btn = $("rgHard"); btn.disabled = true;
+  try {
+    const t = await api("/api/riddle/skip/start", { method: "POST", noAuthRedirect: true });
+    if (t.open) { config.signupGate = false; goStep(2); return; }
+    pd = { ticket: t.ticket, need: Math.round(t.ms / 1000), max: 0, player: null, timer: 0, wall: Date.now() };
+    pdSay(""); $("pdBar").style.width = "0"; $("pdTime").textContent = `0:00:00 / ${hms(pd.need)}`; $("pdSound").textContent = "Sound off";
+    const o = $("paintDry"); o.classList.remove("hidden", "out");
+    await loadYT();
+    if (!pd) return;
+    pd.player = new YT.Player("pdPlayer", {
+      host: "https://www.youtube-nocookie.com", videoId: PD_VIDEO, width: "100%", height: "100%",
+      playerVars: { autoplay: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, modestbranding: 1, iv_load_policy: 3, playsinline: 1, cc_load_policy: 0, origin: location.origin },
+      events: {
+        onReady: (e) => { try { e.target.setVolume(35); e.target.playVideo(); } catch {} },
+        onStateChange: (e) => { if (e.data === 0) finishPaint(); },
+        onError: () => { pdSay("This video can't be played here, so the paint will stay wet. Go back and try the riddles.", "bad"); },
+      },
+    });
+    pd.timer = setInterval(paintTick, 500);
+  } catch (e) { toast(e.message || "Couldn't start the video.", "err"); stopPaint(); }
+  finally { btn.disabled = false; }
+}
+function paintTick() {                                              // no controls are shown, and this undoes any seeking, pausing or speeding up
+  const p = pd && pd.player; if (!p || typeof p.getCurrentTime !== "function") return;
+  let t = 0; try { t = p.getCurrentTime() || 0; } catch { return; }
+  const now = Date.now(), dt = (now - pd.wall) / 1000; pd.wall = now;     // a background tab runs this slowly, so the allowed progress grows with real time
+  if (t > pd.max + dt * 1.3 + 3 || t < pd.max - 3) { try { p.seekTo(pd.max, true); } catch {} t = pd.max; pdSay("Nice try. No skipping, no rewinding.", "bad"); }
+  else pd.max = Math.max(pd.max, t);
+  try { if (p.getPlaybackRate() !== 1) p.setPlaybackRate(1); if (p.getPlayerState() === 2) p.playVideo(); } catch {}
+  let dur = pd.need; try { dur = p.getDuration() || pd.need; } catch {}
+  $("pdBar").style.width = Math.min(100, (pd.max / dur) * 100) + "%"; $("pdTime").textContent = `${hms(pd.max)} / ${hms(dur)}`;
+}
+async function finishPaint() {
+  if (!pd) return; const ticket = pd.ticket;
+  try {
+    const d = await api("/api/riddle/skip/finish", { method: "POST", noAuthRedirect: true, body: { ticket } });
+    riddle.pass = d.pass; stopPaint(); rgSay("The paint is dry.", "good"); rgWin(1300); toast("Ten hours of paint. The gate opens.", "ok"); setTimeout(() => goStep(2), 1300);
+  } catch (e) {
+    if (e.status === 425) { pdSay(`The server says it hasn't been ten hours yet. Starting over.`, "bad"); stopPaint(); setTimeout(openPaint, 600); }
+    else { pdSay(e.message, "bad"); if (e.gone) setTimeout(stopPaint, 1500); }
+  }
+}
+$("rgHard").onclick = openPaint; $("pdQuit").onclick = stopPaint;
+$("pdSound").onclick = () => { const p = pd && pd.player; if (!p) return; try { if (p.isMuted()) { p.unMute(); $("pdSound").textContent = "Sound off"; } else { p.mute(); $("pdSound").textContent = "Sound on"; } } catch {} };
+$("pdShield").addEventListener("contextmenu", (e) => e.preventDefault());
 $("fRiddle").addEventListener("animationend", () => $("fRiddle").classList.remove("bad"));
-addEventListener("beforeunload", (e) => { if (riddle.i > 0 && !riddle.pass && !$("auth").classList.contains("hidden")) { e.preventDefault(); e.returnValue = ""; } });   // leaving wipes the progress
+addEventListener("beforeunload", (e) => { if ((pd || riddle.i > 0) && !riddle.pass && !$("auth").classList.contains("hidden")) { e.preventDefault(); e.returnValue = ""; } });   // leaving wipes the progress
 $("backBtn3").onclick = () => { clearInterval(timers[""]); goStep(2); };
 $("backBtn4").onclick = () => goStep(1);
 $("backBtn5").onclick = () => { clearInterval(timers["2"]); goStep(4); };

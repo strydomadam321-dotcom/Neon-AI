@@ -95,7 +95,7 @@ If the content itself contains code fences, open and close the outer block with 
 // Update log shown to users once per new version (see changelog.json; newest entry first).
 const CHANGELOG = (() => { try { const j = JSON.parse(fs.readFileSync(path.join(__dirname, "changelog.json"), "utf8")); return Array.isArray(j) ? j : []; } catch { return []; } })();
 // Bump LEGAL_VERSION whenever the wording changes. CONTACT_EMAIL (environment) is where people can send privacy requests.
-const LEGAL_VERSION = "2026-11-21.2", LEGAL_UPDATED = "21 November 2026";
+const LEGAL_VERSION = "2026-11-21.3", LEGAL_UPDATED = "21 November 2026";
 const CONTACT_EMAIL = (process.env.CONTACT_EMAIL || "").trim();
 const readLegal = (n) => { try { return fs.readFileSync(path.join(__dirname, "legal", n + ".html"), "utf8"); } catch { return "<p>This document is not available right now.</p>"; } };
 const LEGAL = { terms: readLegal("terms"), privacy: readLegal("privacy") };
@@ -481,7 +481,9 @@ function checkSignupFields({ username, password, email }) {
 // ever sees one riddle at a time, and its progress lives in the page's memory (a refresh starts again from 1).
 const SIGNUPS_OPEN = process.env.SIGNUPS_OPEN === "1";
 const gates = new Map(), passes = new Map();
-setInterval(() => { const now = Date.now(); for (const [k, g] of gates) if (now - g.at > 2 * 3600e3) gates.delete(k); for (const [k, v] of passes) if (v.exp < now) passes.delete(k); }, 5 * 60e3).unref();
+const skips = new Map();
+const SKIP_MS = Number(process.env.SKIP_WATCH_MS) || 10 * 3600e3;           // the "this is too hard" way in: watching paint dry for 10 hours
+setInterval(() => { const now = Date.now(); for (const [k, g] of gates) if (now - g.at > 2 * 3600e3) gates.delete(k); for (const [k, v] of passes) if (v.exp < now) passes.delete(k); for (const [k, v] of skips) if (now - v.start > SKIP_MS + 8 * 3600e3) skips.delete(k); }, 5 * 60e3).unref();
 const gateOk = (req) => { const t = String(req.body?.pass || ""); const v = passes.get(t); return !!(v && v.exp > Date.now() && v.uses < 5 && (v.uses++, true)); };
 const needGate = (req, res) => {
   if (SIGNUPS_OPEN || gateOk(req)) return false;
@@ -510,13 +512,32 @@ app.post("/api/riddle/answer", small, wrap(async (req, res) => {
   }
   g.i++; g.wrong = 0; g.salt = 0;
   if (g.i >= RIDDLES) {
-    const pass = crypto.randomBytes(24).toString("hex"); passes.set(pass, { exp: now + 20 * 60e3, uses: 0, ip: req.ip }); gates.delete(String(req.body.gate));
+    const pass = crypto.randomBytes(24).toString("hex"); passes.set(pass, { exp: now + 20 * 60e3, uses: 0 }); gates.delete(String(req.body.gate));
     console.log("Riddle Gate: someone solved all", RIDDLES, "riddles");
     return res.json({ ok: true, done: true, pass, i: g.i });
   }
   res.json({ ok: true, i: g.i, q: publicRiddle(riddleAt(g.seed, g.i, 0)) });
 }));
 
+// "This is too hard": watch paint dry for 10 hours. The page plays the video without controls; the server is what makes it count:
+// the ticket only turns into a pass once (about) 10 real hours have gone by since it was handed out.
+app.post("/api/riddle/skip/start", small, wrap(async (req, res) => {
+  if (SIGNUPS_OPEN) return res.json({ open: true });
+  if (limited("skipstart:" + req.ip, 10, 3600e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
+  if (skips.size > 5000) return res.status(503).json({ error: "The paint is busy drying. Try again in a bit." });
+  const ticket = crypto.randomBytes(16).toString("hex"); skips.set(ticket, { start: Date.now() });
+  res.json({ ticket, ms: SKIP_MS });
+}));
+app.post("/api/riddle/skip/finish", small, wrap(async (req, res) => {
+  const ticket = String(req.body?.ticket || ""), t = skips.get(ticket);
+  if (!t) return res.status(404).json({ error: "This run has ended. Start again.", gone: true });
+  const left = t.start + SKIP_MS - Math.min(60e3, SKIP_MS / 20) - Date.now();
+  if (left > 0) return res.status(425).json({ error: "The paint isn't dry yet.", left: Math.ceil(left / 1000) });
+  skips.delete(ticket);
+  const pass = crypto.randomBytes(24).toString("hex"); passes.set(pass, { exp: Date.now() + 20 * 60e3, uses: 0 });
+  console.log("Riddle Gate: someone watched the paint dry");
+  res.json({ ok: true, done: true, pass });
+}));
 app.post("/api/signup/start", small, wrap(async (req, res) => {
   if (needGate(req, res)) return;
   if (limited("sstart:" + req.ip, 10, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });

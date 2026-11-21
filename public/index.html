@@ -189,6 +189,7 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
           <input id="riddleAns" type="text" placeholder="Your answer" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="60">
         </label>
         <p class="rg-msg" id="rgMsg" aria-live="polite"></p>
+        <button type="button" class="linkbtn rg-hard" id="rgHard">This is too hard</button>
       </div>
 
       <div id="step3" class="step" hidden>
@@ -441,6 +442,16 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
       <label class="check"><input type="checkbox" id="wnNever"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span><span class="check-txt">Don't show again</span></label>
       <button type="button" class="btn primary" id="wnOk"><span class="lbl">Got it</span></button>
     </div>
+  </div>
+</div>
+<div id="paintDry" class="overlay hidden">
+  <div class="card pd-card" role="dialog" aria-modal="true" aria-labelledby="pdTitle">
+    <h3 id="pdTitle">Fine. Watch paint dry.</h3>
+    <p class="pd-sub">Ten hours of paint drying, start to finish. No pausing, no rewinding, no skipping ahead. <b>Refresh the page or leave and it starts over.</b> When it's done, the gate opens.</p>
+    <div class="pd-video"><div id="pdPlayer"></div><div class="pd-shield" id="pdShield"></div></div>
+    <div class="rg-prog"><div class="rg-bar"><i id="pdBar"></i></div><span id="pdTime">0:00:00 / 10:00:00</span></div>
+    <p class="rg-msg" id="pdMsg" aria-live="polite"></p>
+    <div class="pd-foot"><button type="button" class="btn small" id="pdSound">Sound off</button><button type="button" class="btn small" id="pdQuit">I give up</button></div>
   </div>
 </div>
 <div id="legal" class="overlay hidden">
