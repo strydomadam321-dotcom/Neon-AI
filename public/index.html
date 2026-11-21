@@ -178,6 +178,19 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
         </label>
       </div>
 
+      <div id="step6" class="step" hidden>
+        <button type="button" class="back" id="backBtn6"><svg class="ic"><use href="#i-back"/></svg>Back</button>
+        <h4 class="s2-title">The Riddle Gate</h4>
+        <p class="s2-sub">Sign-ups are closed for now. The only way in: answer <b>300 riddles</b> in a row. <b>Refresh the page and you start again from 1.</b></p>
+        <div class="rg-prog"><div class="rg-bar"><i id="rgBar"></i></div><span id="rgCount">0 / 300</span></div>
+        <div class="rg-card"><span class="rg-kind" id="rgKind">...</span><p class="rg-text" id="rgText">Waking the gatekeeper...</p></div>
+        <label class="field" id="fRiddle">
+          <svg class="ic"><use href="#i-bolt"/></svg>
+          <input id="riddleAns" type="text" placeholder="Your answer" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="60">
+        </label>
+        <p class="rg-msg" id="rgMsg" aria-live="polite"></p>
+      </div>
+
       <div id="step3" class="step" hidden>
         <button type="button" class="back" id="backBtn3"><svg class="ic"><use href="#i-back"/></svg>Back</button>
         <h4 class="s2-title">Check your email</h4>

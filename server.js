@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { TOTAL as RIDDLES, riddleAt, isRight, publicRiddle } from "./riddles.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -429,7 +430,7 @@ const big = express.json({ limit: "45mb" });
 
 // ---------- auth ----------
 app.get("/api/config", (req, res) => {
-  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: !!STRIPE_KEY && STRIPE_LIVE, hasKey: !!process.env.ANTHROPIC_API_KEY, hasGemini: !!GEMINI_KEY, hasGoogle: !!(GOOGLE_ID && GOOGLE_SECRET), mailReady: MAIL_READY, legalVersion: LEGAL_VERSION, version: CHANGELOG[0]?.version || "1", changelog: CHANGELOG.slice(0, 6), defaultEffort: DEFAULT_EFFORT });
+  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: !!STRIPE_KEY && STRIPE_LIVE, hasKey: !!process.env.ANTHROPIC_API_KEY, signupGate: !SIGNUPS_OPEN, hasGemini: !!GEMINI_KEY, hasGoogle: !!(GOOGLE_ID && GOOGLE_SECRET), mailReady: MAIL_READY, legalVersion: LEGAL_VERSION, version: CHANGELOG[0]?.version || "1", changelog: CHANGELOG.slice(0, 6), defaultEffort: DEFAULT_EFFORT });
 });
 
 const USER_RE = /^[A-Za-z0-9_.-]{3,24}$/;
@@ -475,7 +476,49 @@ function checkSignupFields({ username, password, email }) {
 }
 
 // step 1 of email sign-up: nothing is created yet, we just email a code
+// ---------- the Riddle Gate: sign-ups are closed for now, behind 300 riddles ----------
+// Set SIGNUPS_OPEN=1 in the environment to open sign-ups normally again. Riddles and answers stay on the server; the page only
+// ever sees one riddle at a time, and its progress lives in the page's memory (a refresh starts again from 1).
+const SIGNUPS_OPEN = process.env.SIGNUPS_OPEN === "1";
+const gates = new Map(), passes = new Map();
+setInterval(() => { const now = Date.now(); for (const [k, g] of gates) if (now - g.at > 2 * 3600e3) gates.delete(k); for (const [k, v] of passes) if (v.exp < now) passes.delete(k); }, 5 * 60e3).unref();
+const gateOk = (req) => { const t = String(req.body?.pass || ""); const v = passes.get(t); return !!(v && v.exp > Date.now() && v.uses < 5 && v.ip === req.ip && (v.uses++, true)); };
+const needGate = (req, res) => {
+  if (SIGNUPS_OPEN || gateOk(req)) return false;
+  res.status(403).json({ error: "Sign-ups are locked behind the Riddle Gate. Solve all 300 riddles to get in.", field: "riddle" });
+  return true;
+};
+app.post("/api/riddle/start", small, wrap(async (req, res) => {
+  if (SIGNUPS_OPEN) return res.json({ open: true });
+  if (limited("rstart:" + req.ip, 30, 3600e3)) return res.status(429).json({ error: "Easy there. Too many attempts, try again later." });
+  if (gates.size > 20000) return res.status(503).json({ error: "The gate is busy. Try again in a bit." });
+  const id = crypto.randomBytes(16).toString("hex"), g = { seed: crypto.randomInt(1, 2 ** 31), i: 0, salt: 0, wrong: 0, at: Date.now(), last: 0, ip: req.ip };
+  gates.set(id, g);
+  res.json({ gate: id, i: 0, total: RIDDLES, q: publicRiddle(riddleAt(g.seed, 0, 0)) });
+}));
+app.post("/api/riddle/answer", small, wrap(async (req, res) => {
+  const g = gates.get(String(req.body?.gate || ""));
+  if (!g || g.ip !== req.ip) return res.status(404).json({ error: "This run has ended. Start again from riddle 1.", gone: true });
+  if (limited("rans:" + req.ip, 400, 10 * 60e3)) return res.status(429).json({ error: "Slow down. You can't answer that quickly." });
+  const now = Date.now(); if (now - g.last < 250) return res.status(429).json({ error: "Slow down. You can't answer that quickly." });
+  g.last = now; g.at = now;
+  const q = riddleAt(g.seed, g.i, g.salt);
+  if (!isRight(q, req.body?.answer)) {
+    g.wrong++;
+    if (g.wrong >= 6) { g.wrong = 0; g.salt++; return res.json({ ok: false, changed: true, q: publicRiddle(riddleAt(g.seed, g.i, g.salt)), i: g.i }); }   // too many guesses: a new riddle takes its place
+    return res.json({ ok: false, i: g.i, left: 6 - g.wrong });
+  }
+  g.i++; g.wrong = 0; g.salt = 0;
+  if (g.i >= RIDDLES) {
+    const pass = crypto.randomBytes(24).toString("hex"); passes.set(pass, { exp: now + 20 * 60e3, uses: 0, ip: req.ip }); gates.delete(String(req.body.gate));
+    console.log("Riddle Gate: someone solved all", RIDDLES, "riddles");
+    return res.json({ ok: true, done: true, pass, i: g.i });
+  }
+  res.json({ ok: true, i: g.i, q: publicRiddle(riddleAt(g.seed, g.i, 0)) });
+}));
+
 app.post("/api/signup/start", small, wrap(async (req, res) => {
+  if (needGate(req, res)) return;
   if (limited("sstart:" + req.ip, 10, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
   const bad = checkSignupFields(req.body || {});
   if (bad) return res.status(400).json(bad);
@@ -559,6 +602,7 @@ app.post("/api/auth/google/start", small, wrap(async (req, res) => {
   const { username, password, remember } = req.body || {};
   let name = null, hash = null;
   if (username !== undefined || password !== undefined) {   // creating an account: they picked a username and password first
+    if (needGate(req, res)) return;
     const bad = checkSignupFields({ username, password, email: "x@x.xx" });
     if (bad) return res.status(400).json(bad);
     if (req.body?.agree !== true) return res.status(400).json({ error: "Please agree to the Terms and Privacy Policy to continue.", field: "agree" });

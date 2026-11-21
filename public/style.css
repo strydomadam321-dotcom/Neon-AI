@@ -1196,3 +1196,12 @@ body.in-app .rs-dim { opacity: 1; }
 .srcs .s-n { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; font-size: 10.5px; font-weight: 700; color: #0b0220; background: linear-gradient(135deg, var(--cyan), var(--mag)); }
 .chat-item { min-height: 46px; box-sizing: border-box; }
 .set-btns { display: inline-flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; } .set-btns [hidden] { display: none; }
+
+/* ---------- the Riddle Gate (sign-up step) ---------- */
+.rg-prog { display: flex; align-items: center; gap: 10px; margin: 4px 0 10px; font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.rg-bar { flex: 1; height: 7px; border-radius: 9px; background: rgba(var(--lrgb), .18); overflow: hidden; } .rg-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--cyan), var(--mag)); box-shadow: 0 0 12px rgba(var(--a1), .6); transition: width .5s cubic-bezier(.3, 1.25, .4, 1); }
+.rg-card { position: relative; min-height: 112px; padding: 14px 16px 16px; margin-bottom: 10px; border-radius: 14px; background: rgba(var(--deep), .55); border: 1px solid rgba(var(--a1), .35); box-shadow: 0 0 26px rgba(var(--a1), .12), inset 0 0 24px rgba(0, 0, 0, .25); transition: opacity .17s, filter .17s, transform .17s; }
+.rg-card.swap { opacity: 0; filter: blur(5px); transform: translateY(5px); }
+.rg-kind { display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; padding: 3px 9px; border-radius: 99px; color: #0b0220; background: linear-gradient(90deg, var(--cyan), var(--mag)); }
+.rg-text { margin: 10px 0 0; font-size: 16px; line-height: 1.5; color: #fff; }
+.rg-msg { min-height: 1.4em; margin: 8px 2px 0; font-size: 13px; color: var(--dim); transition: color .25s; } .rg-msg.good { color: var(--ok); } .rg-msg.bad { color: var(--bad); }

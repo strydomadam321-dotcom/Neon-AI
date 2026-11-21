@@ -77,7 +77,7 @@ async function api(path, opts = {}) {
   let data = null;
   try { data = await res.json(); } catch {}
   if (res.status === 401 && !opts.noAuthRedirect) { showAuth("Your session expired. Please sign in again."); }
-  if (!res.ok) { const e = new Error(data?.error || `Request failed (${res.status})`); e.status = res.status; e.field = data?.field; throw e; }
+  if (!res.ok) { const e = new Error(data?.error || `Request failed (${res.status})`); e.status = res.status; e.field = data?.field; e.gone = !!data?.gone; throw e; }
   return data;
 }
 
@@ -87,7 +87,7 @@ let step = 1;
 const SPRING = "cubic-bezier(.3, 1.25, .4, 1)";
 let lblTxt = "";
 function syncStep(animate) {
-  const lbl = authEls.btn.querySelector(".lbl"), t = step === 4 ? "Send code" : step === 5 ? "Reset password" : mode === "login" ? "Sign in" : step === 1 ? "Next" : step === 2 ? "Create account" : "Verify";
+  const lbl = authEls.btn.querySelector(".lbl"), t = step === 4 ? "Send code" : step === 5 ? "Reset password" : step === 6 ? "Answer" : mode === "login" ? "Sign in" : step === 1 ? "Next" : step === 2 ? "Create account" : "Verify";
   if (t !== lblTxt) {
     if (animate && lblTxt) {
       const out = lbl.animate([{ opacity: 1, filter: "blur(0)", transform: "translateY(0)" }, { opacity: 0, filter: "blur(4px)", transform: "translateY(-6px)" }], { duration: 140, fill: "forwards" });
@@ -98,10 +98,10 @@ function syncStep(animate) {
     } else lbl.textContent = t;
     lblTxt = t;
   }
-  $("tabsC").classList.toggle("open", step < 4);                       // the reset screens replace the tabs
+  $("tabsC").classList.toggle("open", step < 4 || step === 6);                       // the reset screens replace the tabs
   $("gLoginC").classList.toggle("open", mode === "login" && step < 4);
-  document.querySelectorAll("#stepper i").forEach((d, i) => d.classList.toggle("on", i < Math.min(step, 2)));
-  $("stepTxt").textContent = `Step ${Math.min(step, 2)} of 2`;   // the code screen is not shown as a third step (Google users skip it)
+  document.querySelectorAll("#stepper i").forEach((d, i) => d.classList.toggle("on", i < (step === 6 ? 1 : Math.min(step, 2))));
+  $("stepTxt").textContent = step === 6 ? "The Riddle Gate" : `Step ${Math.min(step, 2)} of 2`;   // the code screen is not shown as a third step (Google users skip it)
 }
 // slide between the two signup steps while the box stretches or shrinks to the new content
 function goStep(n, instant) {
@@ -119,10 +119,55 @@ function goStep(n, instant) {
     wrap.style.height = h1 + "px";
     const an = wrap.animate([{ height: h0 + "px" }, { height: h1 + "px" }], { duration: 700, easing: SPRING });
     an.onfinish = an.oncancel = () => { wrap.style.height = ""; wrap.classList.remove("morphing"); };
-    (n === 5 ? otpR.boxes[0] : n === 4 ? $("emailR") : n === 3 ? otpS.boxes[0] : n === 2 ? $("email") : authEls.user).focus({ preventScroll: true });
+    (n === 6 ? $("riddleAns") : n === 5 ? otpR.boxes[0] : n === 4 ? $("emailR") : n === 3 ? otpS.boxes[0] : n === 2 ? $("email") : authEls.user).focus({ preventScroll: true });
   }, 230);
 }
 $("backBtn").onclick = () => goStep(1);
+$("backBtn6").onclick = () => goStep(1);
+
+// ---------- the Riddle Gate: sign-ups are closed behind 300 riddles; the progress lives only in this page's memory ----------
+const riddle = { gate: "", i: 0, total: 300, pass: "" };
+const gateOn = () => config.signupGate !== false;
+const RG_WRONG = ["Nope.", "Not quite.", "Close, but no.", "Wrong. Try again.", "The gate is unimpressed.", "Hmm. No.", "Incorrect, sadly.", "That's not it."];
+const RG_RIGHT = ["Correct.", "Right.", "Yes!", "Correct. Again.", "Fine, that one was easy.", "Correct. Keep going."];
+const rgMilestone = (i) => ({
+  10: "10 done. Only 290 to go.", 25: "A quarter of a hundred. The gate yawns.", 50: "50! Most people give up around 12.", 75: "75 riddles. Do you have anything better to do?",
+  100: "100. One third of the way. The gate is mildly concerned.", 150: "Halfway. The gate would like you to know that refreshing is very tempting.",
+  200: "200! Two thirds. Please do not touch F5.", 250: "50 to go. The gate is sweating.", 290: "Ten left. Do NOT refresh.", 299: "ONE. MORE.",
+}[i]);
+function rgSay(text, kind) { const m = $("rgMsg"); m.className = "rg-msg " + (kind || ""); m.textContent = text || ""; }
+function rgPaint() { $("rgBar").style.width = (riddle.i / riddle.total) * 100 + "%"; $("rgCount").textContent = `${riddle.i} / ${riddle.total}`; }
+function rgShow(q, quick) {                                           // swap the riddle with a quick blur fade
+  const card = document.querySelector(".rg-card"), apply = () => { $("rgKind").textContent = q.kind; $("rgText").textContent = q.text; card.classList.remove("swap"); };
+  if (quick) apply(); else { card.classList.add("swap"); setTimeout(apply, 170); }
+}
+async function rgStart(msg) {
+  try {
+    const d = await api("/api/riddle/start", { method: "POST", noAuthRedirect: true });
+    if (d.open) { config.signupGate = false; goStep(2); return; }
+    riddle.gate = d.gate; riddle.i = d.i; riddle.total = d.total; rgPaint(); rgShow(d.q, true); rgSay(msg || "", msg ? "bad" : "");
+    $("riddleAns").value = ""; $("riddleAns").focus({ preventScroll: true });
+  } catch (e) { rgSay(e.message || "The gate is asleep. Try again in a moment.", "bad"); }
+}
+function openRiddles() { goStep(6); if (!riddle.gate) { rgSay(""); $("rgText").textContent = "Waking the gatekeeper..."; $("rgKind").textContent = "..."; rgPaint(); rgStart(); } }
+async function submitRiddle() {
+  const inp = $("riddleAns"), a = inp.value.trim(); if (!a || !riddle.gate) { if (!riddle.gate) rgStart(); return; }
+  authEls.btn.disabled = true;
+  try {
+    const d = await api("/api/riddle/answer", { method: "POST", noAuthRedirect: true, body: { gate: riddle.gate, answer: a } });
+    inp.value = "";
+    if (d.done) { riddle.i = d.i; riddle.pass = d.pass; rgPaint(); rgSay("You actually did it.", "good"); toast("The gate opens. Unbelievable.", "ok"); setTimeout(() => goStep(2), 900); return; }
+    if (d.ok) { riddle.i = d.i; rgPaint(); rgShow(d.q); rgSay(rgMilestone(d.i) || RG_RIGHT[d.i % RG_RIGHT.length], "good"); }
+    else if (d.changed) { rgShow(d.q); rgSay("Six wrong answers. The gate swapped the riddle.", "bad"); }
+    else { const f = $("fRiddle"); f.classList.remove("bad"); void f.offsetWidth; f.classList.add("bad"); rgSay(`${RG_WRONG[Math.floor(Math.random() * RG_WRONG.length)]} ${d.left} ${d.left === 1 ? "try" : "tries"} left before this riddle changes.`, "bad"); }
+    inp.focus({ preventScroll: true });
+  } catch (e) {
+    if (e.gone) { riddle.gate = ""; riddle.i = 0; rgPaint(); rgStart("That run expired. Back to riddle 1."); }
+    else rgSay(e.message, "bad");
+  } finally { authEls.btn.disabled = false; }
+}
+$("fRiddle").addEventListener("animationend", () => $("fRiddle").classList.remove("bad"));
+addEventListener("beforeunload", (e) => { if (riddle.i > 0 && !riddle.pass && !$("auth").classList.contains("hidden")) { e.preventDefault(); e.returnValue = ""; } });   // leaving wipes the progress
 $("backBtn3").onclick = () => { clearInterval(timers[""]); goStep(2); };
 $("backBtn4").onclick = () => goStep(1);
 $("backBtn5").onclick = () => { clearInterval(timers["2"]); goStep(4); };
@@ -242,11 +287,12 @@ async function googleGo() {
   googleBusy(true);
   try {
     const body = { remember: $("remember").checked };
-    if (mode === "signup") { body.username = authEls.user.value.trim(); body.password = authEls.pass.value; body.agree = true; }   // the username they chose is kept
+    if (mode === "signup") { body.username = authEls.user.value.trim(); body.password = authEls.pass.value; body.agree = true; body.pass = riddle.pass; }   // the username they chose is kept
     const d = await api("/api/auth/google/start", { method: "POST", noAuthRedirect: true, body });
     location.href = d.url;
   } catch (err) {
     googleBusy(false);
+    if (err.field === "riddle") { riddle.pass = ""; riddle.gate = ""; riddle.i = 0; goStep(6); rgPaint(); rgStart(err.message); return; }
     if (err.field === "username" || err.field === "password") { goStep(1); setTimeout(() => fieldErr(err.field === "username" ? "fUser" : "fPass", err.message), 300); }
     else toast(err.message || "Couldn't open Google. Please try again.", "err");
   }
@@ -337,6 +383,7 @@ $("forgotBtn").onclick = () => { $("emailR").value = authEls.user.value.includes
 
 authEls.form.onsubmit = async (e) => {
   e.preventDefault();
+  if (step === 6) return submitRiddle();
   if (step === 4) return submitForgot();
   if (step === 5) return submitReset();
   const username = authEls.user.value.trim(), password = authEls.pass.value;
@@ -344,7 +391,7 @@ authEls.form.onsubmit = async (e) => {
   if (mode === "signup" && !/^[A-Za-z0-9_.-]{3,24}$/.test(username)) return fieldErr("fUser", "Username: 3-24 characters, letters, numbers, . _ -");
   if (!password) return fieldErr("fPass", "Enter your password.");
   if (mode === "signup" && password.length < 8) return fieldErr("fPass", "Password must be at least 8 characters.");
-  if (mode === "signup" && step === 1) { goStep(2); return; }
+  if (mode === "signup" && step === 1) { if (gateOn() && !riddle.pass) openRiddles(); else goStep(2); return; }
   const email = $("email").value.trim();
   if (mode === "signup" && step === 2 && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fieldErr("fEmail", "Enter a valid email address.");
   if (mode === "signup" && step === 2 && needAgree()) return;
@@ -355,7 +402,7 @@ authEls.form.onsubmit = async (e) => {
     if (mode === "login") data = await api("/api/login", { method: "POST", noAuthRedirect: true, body: { username, password, remember: $("remember").checked } });
     else if (step === 2) {
       // email route: send the code, then slide to the code screen
-      const d = await api("/api/signup/start", { method: "POST", noAuthRedirect: true, body: { username, password, email, agree: true } });
+      const d = await api("/api/signup/start", { method: "POST", noAuthRedirect: true, body: { username, password, email, agree: true, pass: riddle.pass } });
       signupEmail = email.toLowerCase(); $("codeSub").textContent = `We sent a 6-digit code to ${d.email}. It's valid for 10 minutes.`;
       otpS.clear(); startResendCooldown(d.cooldown || 30); goStep(3);
       return;
@@ -365,7 +412,8 @@ authEls.form.onsubmit = async (e) => {
     if (mode === "signup") toast("Account created. Welcome aboard.");
   } catch (err) {
     const map = { email: "fEmail", username: "fUser", password: "fPass" };
-    if (err.field === "code") { otpS.clear(); otpS.shake(); authEls.err.textContent = err.message; if (!err.expired) otpS.boxes[0].focus(); }
+    if (err.field === "riddle") { riddle.pass = ""; riddle.gate = ""; riddle.i = 0; goStep(6); rgPaint(); rgStart(err.message); }
+    else if (err.field === "code") { otpS.clear(); otpS.shake(); authEls.err.textContent = err.message; if (!err.expired) otpS.boxes[0].focus(); }
     else if (map[err.field]) {
       if (mode === "signup" && step >= 2 && err.field !== "email") { goStep(1); setTimeout(() => fieldErr(map[err.field], err.message), 300); }
       else fieldErr(map[err.field], err.message);
