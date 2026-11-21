@@ -342,7 +342,7 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
         <h4>Plan &amp; usage</h4>
         <div class="set-row">
           <div class="txt"><b id="planName">Free</b><span id="planSub"></span></div>
-          <button id="seePlans" type="button" class="btn small"><svg class="ic"><use href="#i-bolt"/></svg>See plans</button>
+          <span class="set-btns"><button id="manageBilling" type="button" class="btn small" hidden>Manage billing</button><button id="seePlans" type="button" class="btn small"><svg class="ic"><use href="#i-bolt"/></svg>See plans</button></span>
         </div>
         <div class="usage" id="usageBox"></div>
         <div class="set-row">

@@ -402,7 +402,8 @@ function planCardHTML(p, opts) {
   const c = PLAN_COPY[p.id] || { feats: [], off: [] };
   const price = p.price === 0 ? "Free" : "A$" + p.price;
   const cur = opts.current === p.id;
-  const cta = opts.gate ? (p.price === 0 ? "Continue with Free" : "Choose " + p.name) : cur ? "Your plan" : p.price === 0 ? "Included" : (plan.requested === p.id ? "Requested" : "Choose plan");
+  const pay = !!plan.billing?.enabled;
+  const cta = opts.gate ? (p.price === 0 ? "Continue with Free" : (pay ? "Subscribe to " : "Choose ") + p.name) : cur ? "Your plan" : p.price === 0 ? "Included" : pay ? "Subscribe" : (plan.requested === p.id ? "Requested" : "Choose plan");
   return `<button type="button" class="plan${cur ? " current" : ""}" data-id="${p.id}" role="button">
     ${c.badge ? `<span class="badge">${c.badge}</span>` : ""}
     <span class="pname">${p.name}</span><span class="ptag">${p.tag}</span>
@@ -417,9 +418,15 @@ function renderPlanGrid(box, opts = {}) {
     if (opts.gate) gateChoose(id); else choosePlan(id);
   }));
 }
+// ---------- paying: Stripe Checkout and the customer portal (the server decides what the plan is; the webhook switches it on) ----------
+async function goBilling(path, body) {
+  try { const d = await api(path, { method: "POST", body: body || {} }); if (d?.url) location.href = d.url; }
+  catch (e) { toast(e.message, "err"); }
+}
 async function choosePlan(id) {
   if (id === plan.id) return;
-  if (id === "free") { toast("You're on a paid plan; contact support to downgrade."); return; }
+  if (id === "free") { if (plan.billing?.customer) goBilling("/api/billing/portal"); else toast("You're already on Free."); return; }
+  if (plan.billing?.enabled) { toast("Taking you to secure checkout..."); goBilling("/api/billing/checkout", { plan: id }); return; }
   try {
     const d = await api("/api/plan/request", { method: "POST", body: { plan: id } });
     plan = d.plan; renderPlans(); renderPlanSettings();
@@ -427,6 +434,15 @@ async function choosePlan(id) {
   } catch (e) { toast(e.message, "err"); }
 }
 let gatePlans = false;
+// after paying, the webhook may take a few seconds to switch the plan on: look every 2 seconds
+async function watchPlanChange() {
+  const before = plan.id; toast("Payment received. Switching on your plan...");
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    try { const d = await api("/api/me", { noAuthRedirect: true }); if (d?.plan && d.plan.id !== before) { plan = d.plan; renderPlanSettings(); renderPlans(); toast("You're on " + (config.plans.find((p) => p.id === plan.id)?.name || "your new plan") + ". Thank you!"); return; } } catch {}
+  }
+  toast("Your payment went through. If your plan hasn't changed in a minute, refresh the page.");
+}
 function renderPlans() { renderPlanGrid($("plansGrid"), { current: plan.id, gate: gatePlans }); }
 function openPlans(gate) {
   gatePlans = gate === true;                                    // gate = new account: must choose before using the app, can't be closed
@@ -441,6 +457,7 @@ function closePlans() { if (gatePlans) return; $("plans").classList.add("hidden"
 async function gateChoose(id) {
   try {
     const d = await api("/api/plan/choose", { method: "POST", body: { plan: id } });
+    if (id !== "free" && d.plan.billing?.enabled) { plan = d.plan; toast("Taking you to secure checkout..."); goBilling("/api/billing/checkout", { plan: id }); return; }
     plan = d.plan; gatePlans = false; $("plans").classList.add("hidden"); renderPlanSettings(); maybeWhatsNew();
     toast(id === "free" ? "You're on Free. Welcome aboard." : "Got it. You start on Free, and we'll switch on " + (config.plans.find((p) => p.id === id)?.name || "your plan") + " when payments open.");
   } catch (e) { toast(e.message, "err"); }
@@ -475,11 +492,15 @@ addEventListener("keydown", (e) => { if (e.key === "Escape" && wnShowing) { e.st
 $("closePlans").onclick = closePlans;
 $("plans").onmousedown = (e) => { if (e.target === $("plans")) closePlans(); };
 $("seePlans").onclick = () => openPlans(false);
+$("manageBilling").onclick = () => goBilling("/api/billing/portal");
 function renderPlanSettings() {
   const p = config.plans.find((x) => x.id === plan.id) || { name: "Free" };
   $("planName").textContent = user?.dev ? "Developer" : p.name + (plan.owner ? " (owner)" : "");
   const req = plan.requested ? ` Requested: ${config.plans.find((x) => x.id === plan.requested)?.name}, switches on when payments open.` : "";
   $("planSub").textContent = (plan.id === "free" ? "Gemini only, with a token limit that resets every 12 hours." : plan.id === "plus" ? "Unlimited Gemini, plus Claude Sonnet and Haiku." : user?.dev ? "Dev account: full access, no limits." : plan.id === "max" ? "Everything, unlimited." : "Unlimited Gemini.") + req;
+  const b = plan.billing || {}, mb = $("manageBilling");
+  mb.hidden = !b.customer;
+  if (b.customer && b.renews && plan.id !== "free" && !user?.dev) $("planSub").textContent += " " + (b.cancelling ? "Ends on " : "Renews on ") + new Date(b.renews).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }) + (b.status === "past_due" ? ". Your last payment failed, please update your card." : ".");
   renderUsage();
 }
 // ---------- daily usage: the ring beside your name, its pop-up, and the Settings section ----------
@@ -1746,13 +1767,15 @@ async function enterApp(data) {
 }
 
 (async function init() {
-  const qs = new URLSearchParams(location.search), authErr = qs.get("auth_error"), welcome = qs.has("welcome");
-  if (authErr || welcome) history.replaceState(null, "", location.pathname);
+  const qs = new URLSearchParams(location.search), authErr = qs.get("auth_error"), welcome = qs.has("welcome"), billing = qs.get("billing");
+  if (authErr || welcome || billing) history.replaceState(null, "", location.pathname);
   try { config = await (await fetch("/api/config")).json(); } catch {}
   try {
     const data = await api("/api/me", { noAuthRedirect: true });
     await enterApp(data);
     if (welcome) toast("Account created with Google. Welcome aboard.");
+    if (billing === "cancel") toast("Checkout cancelled. You haven't been charged.");
+    if (billing === "success") watchPlanChange();
   } catch {
     showAuth(authErr || "");
     if (authErr) toast(authErr, "err");

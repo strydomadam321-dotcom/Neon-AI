@@ -1195,3 +1195,4 @@ body.in-app .rs-dim { opacity: 1; }
 .srcs a:hover { color: #fff; border-color: var(--cyan); transform: translateY(-1px); }
 .srcs .s-n { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; font-size: 10.5px; font-weight: 700; color: #0b0220; background: linear-gradient(135deg, var(--cyan), var(--mag)); }
 .chat-item { min-height: 46px; box-sizing: border-box; }
+.set-btns { display: inline-flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; } .set-btns [hidden] { display: none; }

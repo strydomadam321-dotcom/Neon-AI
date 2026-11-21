@@ -29,6 +29,7 @@ const GEMINI_MODELS = process.env.GEMINI_MODELS
   : GEMINI_DEFAULTS;
 const MODELS = [...GEMINI_MODELS, ...CLAUDE_MODELS];   // Gemini first, Claude below
 const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
+const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || "", STRIPE_WH = process.env.STRIPE_WEBHOOK_SECRET || "", STRIPE_LIVE = /^(sk|rk)_live_/.test(STRIPE_KEY);
 const GEMINI_BASE = process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com";
 // Model used for chat titles (tried first). Override with TITLE_MODEL.
 const TITLE_MODEL = process.env.TITLE_MODEL || "gemini-3.5-flash";
@@ -173,6 +174,12 @@ create table if not exists password_resets(
   sent_at timestamptz not null default now()
 );
 alter table users add column if not exists plan_chosen boolean not null default false;
+alter table users add column if not exists stripe_customer text;
+alter table users add column if not exists stripe_sub text;
+alter table users add column if not exists stripe_status text;
+alter table users add column if not exists plan_renews timestamptz;
+alter table users add column if not exists plan_cancelling boolean not null default false;
+create index if not exists users_stripe_customer on users(stripe_customer);
 alter table users add column if not exists terms_version text;
 alter table users add column if not exists terms_at timestamptz;
 create table if not exists site_state(
@@ -422,7 +429,7 @@ const big = express.json({ limit: "45mb" });
 
 // ---------- auth ----------
 app.get("/api/config", (req, res) => {
-  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: false, hasKey: !!process.env.ANTHROPIC_API_KEY, hasGemini: !!GEMINI_KEY, hasGoogle: !!(GOOGLE_ID && GOOGLE_SECRET), mailReady: MAIL_READY, legalVersion: LEGAL_VERSION, version: CHANGELOG[0]?.version || "1", changelog: CHANGELOG.slice(0, 6), defaultEffort: DEFAULT_EFFORT });
+  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: !!STRIPE_KEY && STRIPE_LIVE, hasKey: !!process.env.ANTHROPIC_API_KEY, hasGemini: !!GEMINI_KEY, hasGoogle: !!(GOOGLE_ID && GOOGLE_SECRET), mailReady: MAIL_READY, legalVersion: LEGAL_VERSION, version: CHANGELOG[0]?.version || "1", changelog: CHANGELOG.slice(0, 6), defaultEffort: DEFAULT_EFFORT });
 });
 
 const USER_RE = /^[A-Za-z0-9_.-]{3,24}$/;
@@ -722,11 +729,12 @@ const addUsage = (userId, tokens, msgs) => q(`insert into usage_window(user_id, 
     started_at = case when usage_window.started_at + interval '12 hours' <= now() then now() else usage_window.started_at end`, [userId, Math.max(0, Math.floor(tokens || 0)), msgs || 0]);
 const resetIn = (at) => { const m = Math.max(1, Math.ceil(((at || Date.now() + WINDOW_MS) - Date.now()) / 60e3)); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
 async function mePayload(u) {
-  const extra = (await q("select email_norm, email_verified, plan_chosen from users where id = $1", [u.id])).rows[0] || {};
+  const extra = (await q("select email_norm, email_verified, plan_chosen, stripe_customer, stripe_status, plan_renews, plan_cancelling from users where id = $1", [u.id])).rows[0] || {};
   const dev = isDevRow(extra), plan = effectivePlan({ ...u, dev }), use = await todayUsage(u.id);
   return {
     user: { username: u.username, hasPassword: u.has_password !== false, picture: u.avatar || null, dev }, settings: u.settings,
     plan: { id: plan, requested: u.plan_requested && u.plan_requested !== plan ? u.plan_requested : null, owner: OWNERS.has(u.username.toLowerCase()), chosen: dev || !!extra.plan_chosen, usedTokens: use.gemini, usedClaude: use.claude, resetAt: use.resetAt },
+    billing: { enabled: !!STRIPE_KEY && (STRIPE_LIVE || dev), test: !STRIPE_LIVE, customer: !!extra.stripe_customer, status: extra.stripe_status || null, renews: extra.plan_renews ? new Date(extra.plan_renews).getTime() : null, cancelling: !!extra.plan_cancelling },
   };
 }
 app.get("/api/me", requireAuth, wrap(async (req, res) => res.json(await mePayload(req.user))));
@@ -1363,6 +1371,137 @@ Rules: reply with ONE or TWO short sentences (under 30 words) of casual chat, th
   if (out.tokens > 0) addUsage(req.user.id, out.tokens, 0).catch(() => {});
   const text = clip(out.text.replace(/^["'“”]+|["'“”]+$/g, "").replace(new RegExp("^" + name + "\\s*:\\s*", "i"), ""), 280);
   res.json({ text });
+}));
+
+// ---------- billing with Stripe ----------
+// Plans are Stripe subscriptions. The prices are found by lookup key (so no price IDs to copy around). A signed webhook
+// is what switches a plan on or off; the browser coming back from Checkout never decides anything.
+const PLAN_LOOKUP = { spark: "neon_spark_monthly", plus: "neon_plus_monthly", max: "neon_max_monthly" };
+const stripeEnc = (o, pre = "", out = []) => {
+  for (const [k, v] of Object.entries(o)) {
+    if (v == null) continue;
+    const key = pre ? `${pre}[${k}]` : k;
+    if (Array.isArray(v)) v.forEach((x, i) => (x && typeof x === "object" ? stripeEnc(x, `${key}[${i}]`, out) : out.push([`${key}[${i}]`, x])));
+    else if (typeof v === "object") stripeEnc(v, key, out);
+    else out.push([key, v]);
+  }
+  return out;
+};
+async function stripeApi(method, route, body, idem) {
+  if (!STRIPE_KEY) throw Object.assign(new Error("Payments aren't set up yet."), { status: 503 });
+  const r = await fetch("https://api.stripe.com/v1" + route, {
+    method, signal: AbortSignal.timeout(20000),
+    headers: { Authorization: "Bearer " + STRIPE_KEY, ...(body ? { "Content-Type": "application/x-www-form-urlencoded" } : {}), ...(idem ? { "Idempotency-Key": idem } : {}) },
+    body: body ? stripeEnc(body).map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v)).join("&") : undefined,
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(j.error?.message || `Stripe error ${r.status}`); e.status = r.status; e.stripe = j.error; throw e; }
+  return j;
+}
+const priceCache = new Map();
+async function stripePrice(planId) {
+  const hit = priceCache.get(planId);
+  if (hit && hit.at > Date.now() - 10 * 60e3) return hit.id;
+  const j = await stripeApi("GET", `/prices?lookup_keys[]=${encodeURIComponent(PLAN_LOOKUP[planId])}&active=true&limit=1`);
+  const id = j.data?.[0]?.id;
+  if (!id) throw Object.assign(new Error("That plan isn't set up in Stripe yet."), { status: 503 });
+  priceCache.set(planId, { id, at: Date.now() });
+  return id;
+}
+const publicBase = (req) => process.env.PUBLIC_URL || `${/^(localhost|127\.)/.test(req.get("host") || "") ? "http" : "https"}://${req.get("host")}`;
+const billingOn = (u) => !!STRIPE_KEY && (STRIPE_LIVE || u.dev);          // while Stripe is in test mode only dev accounts see real checkout
+
+// turns a Stripe subscription into the user's plan: active (or being retried after a failed payment) keeps it, anything else is Free
+async function applySubscription(sub, fallbackUserId) {
+  const key = sub.items?.data?.[0]?.price?.lookup_key;
+  const planId = Object.keys(PLAN_LOOKUP).find((k) => PLAN_LOOKUP[k] === key);
+  const entitled = ["active", "trialing", "past_due"].includes(sub.status) && !!planId;
+  const customer = typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
+  let uid = Number(sub.metadata?.user_id) || Number(fallbackUserId) || 0;
+  if (!uid && customer) uid = (await q("select id from users where stripe_customer = $1", [customer])).rows[0]?.id || 0;
+  if (!uid) { console.warn("Stripe subscription with no matching user:", sub.id); return; }
+  const end = sub.items?.data?.[0]?.current_period_end || sub.current_period_end;
+  await q(`update users set plan = $2, plan_requested = case when $2 = 'free' then plan_requested else null end, stripe_customer = coalesce($3, stripe_customer), stripe_sub = $4, stripe_status = $5,
+           plan_renews = case when $6::bigint is null then null else to_timestamp($6::bigint) end, plan_cancelling = $7, plan_chosen = true where id = $1`,
+    [uid, entitled ? planId : "free", customer || null, sub.id, sub.status, end || null, !!(sub.cancel_at_period_end || sub.cancel_at)]);
+  console.log(`Stripe: user ${uid} is now on ${entitled ? planId : "free"} (${sub.status})`);
+}
+
+app.post("/api/billing/checkout", requireAuth, small, wrap(async (req, res) => {
+  if (!billingOn(req.user)) return res.status(403).json({ error: STRIPE_KEY ? "Payments are in test mode for now." : "Payments aren't open yet." });
+  const planId = req.body?.plan;
+  if (!PLAN_LOOKUP[planId]) return res.status(400).json({ error: "Unknown plan." });
+  if (limited("billing:" + req.user.id, 10, 60e3)) return res.status(429).json({ error: "Too many attempts. Try again in a minute." });
+  const u = (await q("select id, email, email_verified, stripe_customer, stripe_sub, stripe_status from users where id = $1", [req.user.id])).rows[0];
+  const base = publicBase(req);
+  // someone who already pays changes plan (or cancels) in Stripe's customer portal instead of getting a second subscription
+  if (u.stripe_customer && ["active", "trialing", "past_due"].includes(u.stripe_status)) return res.json({ url: await portalUrl(u.stripe_customer, base) });
+  const price = await stripePrice(planId);
+  const session = await stripeApi("POST", "/checkout/sessions", {
+    mode: "subscription", line_items: [{ price, quantity: 1 }],
+    success_url: base + "/?billing=success", cancel_url: base + "/?billing=cancel",
+    client_reference_id: String(u.id), allow_promotion_codes: "true",
+    ...(u.stripe_customer ? { customer: u.stripe_customer } : u.email && u.email_verified ? { customer_email: u.email } : {}),
+    metadata: { user_id: String(u.id), plan: planId }, subscription_data: { metadata: { user_id: String(u.id), plan: planId }, billing_mode: { type: "flexible" } },
+  }, `checkout-${u.id}-${planId}-${Math.floor(Date.now() / 60e3)}`);
+  res.json({ url: session.url });
+}));
+
+let portalConfigId = process.env.STRIPE_PORTAL_CONFIG || "";
+async function portalConfig() {
+  if (portalConfigId) return portalConfigId;
+  const prices = await Promise.all(Object.keys(PLAN_LOOKUP).map(stripePrice));
+  const products = [];
+  for (const pr of prices) { const j = await stripeApi("GET", `/prices/${pr}`); products.push({ product: j.product, prices: [pr] }); }
+  const c = await stripeApi("POST", "/billing_portal/configurations", {
+    business_profile: { headline: "Manage your NEON AI plan" },
+    features: {
+      customer_update: { enabled: true, allowed_updates: ["email", "name"] },
+      invoice_history: { enabled: true }, payment_method_update: { enabled: true },
+      subscription_cancel: { enabled: true, mode: "at_period_end" },
+      subscription_update: { enabled: true, default_allowed_updates: ["price"], proration_behavior: "create_prorations", products },
+    },
+  });
+  portalConfigId = c.id; console.log("Stripe portal configuration created:", c.id, "(set STRIPE_PORTAL_CONFIG to reuse it)");
+  return portalConfigId;
+}
+async function portalUrl(customer, base) {
+  const ps = await stripeApi("POST", "/billing_portal/sessions", { customer, return_url: base + "/", configuration: await portalConfig() });
+  return ps.url;
+}
+app.post("/api/billing/portal", requireAuth, small, wrap(async (req, res) => {
+  if (!STRIPE_KEY) return res.status(503).json({ error: "Payments aren't set up yet." });
+  const u = (await q("select stripe_customer from users where id = $1", [req.user.id])).rows[0];
+  if (!u?.stripe_customer) return res.status(400).json({ error: "You don't have a subscription to manage." });
+  res.json({ url: await portalUrl(u.stripe_customer, publicBase(req)) });
+}));
+
+// Stripe -> us. The body must stay raw so the signature can be checked.
+function verifyStripe(raw, header, secret) {
+  const parts = Object.fromEntries(String(header || "").split(",").map((x) => x.trim().split("=")).filter((x) => x.length === 2).map(([k, v]) => [k, v]));
+  const sigs = String(header || "").split(",").map((x) => x.trim()).filter((x) => x.startsWith("v1=")).map((x) => x.slice(3));
+  if (!parts.t || !sigs.length || Math.abs(Date.now() / 1000 - Number(parts.t)) > 300) return false;
+  const want = crypto.createHmac("sha256", secret).update(`${parts.t}.`).update(raw).digest("hex");
+  return sigs.some((g) => g.length === want.length && crypto.timingSafeEqual(Buffer.from(g), Buffer.from(want)));
+}
+app.post("/api/stripe/webhook", express.raw({ type: () => true, limit: "1mb" }), wrap(async (req, res) => {
+  if (!STRIPE_WH) return res.status(503).json({ error: "Webhook secret not set" });
+  if (!Buffer.isBuffer(req.body) || !verifyStripe(req.body, req.get("stripe-signature"), STRIPE_WH)) return res.status(400).json({ error: "Bad signature" });
+  let ev; try { ev = JSON.parse(req.body.toString("utf8")); } catch { return res.status(400).json({ error: "Bad payload" }); }
+  const obj = ev.data?.object || {};
+  if (ev.type === "checkout.session.completed" && obj.mode === "subscription" && obj.subscription) {
+    await applySubscription(await stripeApi("GET", `/subscriptions/${obj.subscription}?expand[]=items.data.price`), obj.client_reference_id);
+  } else if (/^customer\.subscription\.(created|updated|deleted)$/.test(ev.type) && obj.id) {
+    // fetch the current state instead of trusting the order events arrive in
+    let sub = obj; try { sub = await stripeApi("GET", `/subscriptions/${obj.id}`); } catch (e) { if (ev.type !== "customer.subscription.deleted") throw e; }
+    await applySubscription(sub);
+  } else if (ev.type === "invoice.paid") {
+    const subId = typeof obj.subscription === "string" ? obj.subscription : obj.subscription?.id || obj.parent?.subscription_details?.subscription;
+    if (subId) await applySubscription(await stripeApi("GET", `/subscriptions/${subId}`));
+  } else if (ev.type === "invoice.payment_failed") {
+    console.warn("Stripe: a payment failed for customer", obj.customer);
+  }
+  res.json({ received: true });
 }));
 
 // ---------- trading practice (/larp): Gemini writes the market-day stories, reviews sessions and answers questions ----------
