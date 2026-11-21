@@ -50,13 +50,14 @@ function toast(msg, kind = "ok") {
   setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 300); }, kind === "err" ? 5200 : 2600);
 }
 
-function dialog({ title, message = "", input = null, ok = "OK", danger = false, password = false, placeholder = "" }) {
+function dialog({ title, message = "", input = null, ok = "OK", danger = false, password = false, placeholder = "", cancel = true }) {
   return new Promise((resolve) => {
     const box = $("dialog"), form = $("dlgForm"), inp = $("dlgInput");
     $("dlgTitle").textContent = title;
     $("dlgMsg").textContent = message; $("dlgMsg").hidden = !message;
     inp.hidden = input === null; if (input !== null) inp.value = input;
     inp.type = password ? "password" : "text"; inp.placeholder = placeholder; inp.autocomplete = password ? "current-password" : "off"; inp.maxLength = password ? 72 : 120;
+    $("dlgCancel").hidden = !cancel;
     const okb = $("dlgOk"); okb.textContent = ok;
     okb.className = "btn " + (danger ? "danger" : "primary");
     box.classList.remove("hidden");
@@ -1044,7 +1045,7 @@ async function streamReply() {
   scrollDown(true);
 
   const usedModel = els.model.value;
-  let text = "", raf = 0, errMsg = "";
+  let text = "", raf = 0, errMsg = "", downNote = "";
   const paint = () => {
     raf = 0;
     if (current !== chat) return;
@@ -1083,6 +1084,8 @@ async function streamReply() {
           else if (a.k === "query") { const last = [...actsEl.querySelectorAll('.act[data-k="search"]')].pop(), ar = [...acts].reverse().find((x) => x.k === "search"); if (ar) { ar.t = "Searching the web for “" + a.q + "”"; if (last) last.querySelector(".act-t").textContent = ar.t; } }
           else if (a.k === "read") addAct("read", "Reading " + a.n + " source" + (a.n === 1 ? "" : "s"));
         }
+        if (ev.switched) toast("That model had a problem, so I switched to " + ev.switched.name + " for this answer.");
+        if (ev.down) downNote = ev.down;
         if (ev.src) ev.src.forEach((s) => { if (s.u && !sources.some((x) => x.u === s.u)) sources.push(s); });
         if (ev.error) errMsg = ev.error;
         if (ev.tokens != null) { plan.usedTokens = ev.tokens; renderPlanSettings(); }
@@ -1094,6 +1097,7 @@ async function streamReply() {
   if (raf) cancelAnimationFrame(raf);
   setBusy(false); abortCtl = null;
   if (!user) return;
+  if (downNote && !text) dialog({ title: downNote === "limit" ? "Gemini's limit is used up" : "Gemini is having trouble", message: downNote === "limit" ? "Gemini's free limit is used up for now. Try again in a little while." : "Sorry, gemini server might be down rn.", ok: "OK", cancel: false });
   if (text || errMsg) chat.messages.push({ role: "assistant", text, ...(errMsg ? { err: errMsg, errModel: usedModel } : {}), ...(searched && acts.length ? { acts: acts.map((a) => ({ k: a.k, t: a.t.replace(/^Searching the web for/, "Searched the web for") })), sources: sources.slice(0, 8) } : {}) });
   if (text && !errMsg && config.models.find((m) => m.id === usedModel)?.provider === "claude") { plan.usedClaude++; renderUsage(); }
   const saved = await persist(chat);

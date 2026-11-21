@@ -1,5 +1,17 @@
 [
   {
+    "version": "2.2.1",
+    "date": "21 November 2026",
+    "title": "NEON AI V2.2.1",
+    "tag": "Fix",
+    "items": [
+      {
+        "icon": "🔧",
+        "text": "<b>Gemini 3.5 Flash-Lite can search the web</b> now, and if a Gemini model fails or gives an empty answer, NEON AI automatically tries the next one (3.5 Flash-Lite, 2.5 Flash, then 3.6 Flash)."
+      }
+    ]
+  },
+  {
     "version": "2.2",
     "date": "21 November 2026",
     "title": "NEON AI V2.2",

@@ -1008,7 +1008,7 @@ function geminiThinking(id, effort) {
   return { thinkingBudget: budget };
 }
 
-async function geminiStream({ model, history, system, effort, send, signal }) {
+async function geminiStream({ model, history, system, effort, send, signal, final = true, st = {}, noTools = false }) {
   const contents = history.map((m) => {
     if (m.role === "assistant") return { role: "model", parts: [{ text: m.text }] };
     const parts = [];
@@ -1021,7 +1021,7 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
     return { role: "user", parts };
   });
 
-  let sentText = false, tokens = 0, seg = "", maxOut = learnedGeminiMax.get(model) || 65536, useSearch = !searchOff(model);
+  let sentText = false, tokens = 0, seg = "", maxOut = learnedGeminiMax.get(model) || 65536, useSearch = !noTools && !searchOff(model);
   const seenQ = new Set(); let seenSrc = 0;
   async function attempt(withThinking) {
     const generationConfig = { maxOutputTokens: maxOut };
@@ -1049,7 +1049,7 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
         const cand = j.candidates?.[0];
         for (const p of cand?.content?.parts || []) {
           if (p.thought) { send({ th: 1 }); continue; }
-          if (typeof p.text === "string" && p.text) { sentText = true; seg += p.text; send({ t: p.text }); }
+          if (typeof p.text === "string" && p.text) { sentText = true; st.sent = true; seg += p.text; send({ t: p.text }); }
         }
         const gm = cand?.groundingMetadata;
         if (gm) {
@@ -1090,8 +1090,39 @@ async function geminiStream({ model, history, system, effort, send, signal }) {
   if (res1.blocked) send({ t: "\n\n*(Gemini blocked this request.)*" });
   else if (res1.finish === "MAX_TOKENS") send({ t: "\n\n*(Reached max length.)*" });
   else if (res1.finish === "SAFETY" || res1.finish === "PROHIBITED_CONTENT") send({ t: "\n\n*(Gemini declined to answer this request.)*" });
-  else if (!sentText) send({ t: "*(Gemini returned an empty response. Try again or pick another model.)*" });
+  else if (!sentText) { if (!final) { st.empty = true; return tokens; } send({ t: "*(Gemini returned an empty response. Try again or pick another model.)*" }); }
   return tokens;
+}
+
+// Some models (Flash-Lite) answer nothing when they search for themselves. For those, a search-capable model does the
+// searching and writes short research notes (with sources), and the chosen model writes the answer from them.
+const RESEARCH_MODELS = ["gemini-2.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"];
+const viaHelper = new Map();                                        // model id -> time until which it uses the helper
+const usesHelper = (id) => (viaHelper.get(id) || 0) > Date.now();
+async function geminiResearch({ history, send, signal }) {
+  const out = { notes: "", tokens: 0 };
+  const rm = RESEARCH_MODELS.find((id) => MODELS.some((m) => m.id === id));
+  if (!rm) return out;
+  const talk = history.slice(-6).map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${String(m.text || "").slice(0, 1500)}`).join("\n");
+  const system = `You are a research assistant with web search. Today is ${new Date().toISOString().slice(0, 10)} (UTC). Read the conversation and search the web for anything in the user's latest message that depends on recent or changing facts (news, releases, prices, scores, versions, reviews). Reply with concise research notes (at most 350 words): the key facts with dates and numbers, and the names of the sources. If the latest message needs no web search at all (chit-chat, maths, coding, creative writing, general knowledge that does not change), reply with exactly NO_SEARCH.`;
+  try {
+    const r = await fetch(`${GEMINI_BASE}/v1beta/models/${encodeURIComponent(rm)}:generateContent`, {
+      method: "POST", signal: AbortSignal.any ? AbortSignal.any([signal, AbortSignal.timeout(40000)]) : signal,
+      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: talk }] }], tools: [{ google_search: {} }], generationConfig: { maxOutputTokens: 1200, temperature: 0.2 } }),
+    });
+    if (!r.ok) return out;
+    const j = await r.json(), cand = j.candidates?.[0];
+    out.tokens = j.usageMetadata?.totalTokenCount || 0;
+    const text = (cand?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("").trim();
+    if (!text || /^NO_SEARCH\b/.test(text)) return out;
+    out.notes = text.slice(0, 4000);
+    const gm = cand?.groundingMetadata;
+    for (const sq of gm?.webSearchQueries || []) { send({ act: { k: "search" } }); send({ act: { k: "query", q: String(sq).slice(0, 120) } }); }
+    const web = webSrc((gm?.groundingChunks || []).map((c) => c.web).filter(Boolean));
+    if (web.length) { send({ act: { k: "read", n: web.length } }); send({ src: web }); }
+  } catch (e) { if (e?.name === "AbortError" && signal?.aborted) throw e; }
+  return out;
 }
 
 app.post("/api/chat", requireAuth, big, async (req, res) => {
@@ -1134,7 +1165,35 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
   try {
     if (info.provider === "gemini") {
       if (!GEMINI_KEY) throw Object.assign(new Error("Gemini isn't set up yet. Add GEMINI_API_KEY in Render's Environment settings."), { provider: "gemini", status: 0 });
-      const used = await geminiStream({ model: info.id, history, system, effort, send, signal: ctl.signal });
+      // if a model fails or answers with nothing, try the others in turn: 3.5 Flash-Lite, 2.5 Flash, 3.6 Flash.
+      // A model that answers nothing when it searches by itself gets its web results from a research helper instead.
+      const chain = [info.id, ...["gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-3.6-flash"].filter((id) => id !== info.id && MODELS.some((m) => m.id === id))];
+      let used = 0, ok = false, lastErr = null;
+      const tryModel = async (id, helper) => {
+        const st = {};
+        try {
+          let sys = system;
+          if (helper) {
+            const rs = await geminiResearch({ history, send, signal: ctl.signal }); used += rs.tokens;
+            if (rs.notes) sys += "\n\nWEB RESEARCH (fresh results from a live web search made just now; rely on them over your memory, and mention the source names naturally):\n" + rs.notes;
+          }
+          used += await geminiStream({ model: id, history, system: sys, effort, send, signal: ctl.signal, final: false, st, noTools: helper });
+        } catch (e) { e.sent = !!st.sent; throw e; }
+        return st;
+      };
+      for (let i = 0; i < chain.length && !ok; i++) {
+        try {
+          if (i > 0) { const nm = (MODELS.find((m) => m.id === chain[i])?.name || chain[i]).split("·")[0].trim(); send({ switched: { to: chain[i], name: nm } }); }
+          let st = await tryModel(chain[i], usesHelper(chain[i]));
+          if (st.empty && !usesHelper(chain[i])) { viaHelper.set(chain[i], Date.now() + 30 * 60e3); st = await tryModel(chain[i], true); }
+          if (!st.empty) ok = true; else lastErr = Object.assign(new Error("empty"), { status: 200, provider: "gemini" });
+        } catch (e) {
+          if (e?.name === "AbortError" || ctl.signal.aborted) throw e;
+          if (e.sent || e.status === 401 || e.status === 403 || (e.status === 400 && /api key/i.test(String(e.message)))) throw e;   // half an answer is out already, or the key itself is the problem
+          lastErr = e;
+        }
+      }
+      if (!ok) { send({ down: lastErr?.status === 429 ? "limit" : "down" }); console.warn("Gemini fallbacks all failed:", lastErr?.status, String(lastErr?.message || "").slice(0, 160)); }
       if (used > 0) q("insert into usage(user_id,day,gemini_tokens) values($1,current_date,$2) on conflict(user_id,day) do update set gemini_tokens = usage.gemini_tokens + $2", [req.user.id, used]).catch(() => {});
       send({ done: true, tokens: use.gemini + (used || 0) });
     } else {
