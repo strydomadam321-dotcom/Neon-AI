@@ -1,5 +1,21 @@
 [
   {
+    "version": "2.1",
+    "date": "21 November 2026",
+    "title": "NEON AI V2.1",
+    "tag": "New",
+    "items": [
+      {
+        "icon": "🧮",
+        "text": "<b>Proper maths.</b> Equations, fractions, roots and symbols now show as real maths instead of messy code, in inline text and in big centred equations."
+      },
+      {
+        "icon": "🔧",
+        "text": "<b>Code blocks.</b> Fixed an oversized Copy button that could appear on code blocks."
+      }
+    ]
+  },
+  {
     "version": "2.0.1",
     "date": "20 November 2026",
     "title": "NEON AI V2.0.1",

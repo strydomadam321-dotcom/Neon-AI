@@ -53,3 +53,6 @@
 ## Update log (`changelog.json`)
 - Every redeploy adds a NEW entry at the TOP of `changelog.json` (`version`, `date`, `title`, `tag`, `items[{icon,text}]`; `<b>`/`<i>` allowed in text). The server sends it in `/api/config`; the client shows the newest one once per version when the main page loads (seen version in localStorage `neon-seen-<username>`; the "Don't show again" tick stores `neon-nolog-<username>` and stops all future pop-ups; Settings > "What's new" reopens it).
 - Pick the version by size of the change: big, headline features = next major (V3); a new feature or noticeable improvement = minor (2.1); small fixes/tweaks = patch (2.0.1). Keep items short and in plain language for users.
+
+## Maths
+- `md()` in `public/app.js` pulls `$...$`, `$$...$$`, `\(...\)` and `\[...\]` out of the text (never from code), lets marked/DOMPurify handle the rest, then puts KaTeX output back (KaTeX from cdnjs in `index.html`). `MATH_RULES` in `server.js` tells the models to write LaTeX. Chess piece CSS is scoped under `.ch-pieces` (a bare `.cp` rule once broke the code-block Copy button).

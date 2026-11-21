@@ -74,6 +74,7 @@ const GOOGLE_TOKEN_URL = process.env.GOOGLE_TOKEN_URL || "https://oauth2.googlea
 const CODE_MS = 10 * 60e3, RESEND_COOLDOWN_MS = 30e3, MAX_CODE_TRIES = 5;
 
 // Appended to every system prompt (also the user's own custom instructions): how the model hands over real files
+const MATH_RULES = `MATHS: write any mathematics in LaTeX, never as plain text. Inline maths goes between single dollar signs like $x^2 + 1$ and displayed equations go on their own lines between double dollar signs like $$\\frac{a}{b}$$. Do not put LaTeX inside code blocks, and write money as plain text such as 5 dollars or \\$5.`;
 const FILE_RULES = `FILES: you can hand the user real, downloadable files. When they ask for a PDF, a Word document (.docx), a PowerPoint (.pptx), or an Excel / Google Sheets spreadsheet (.xlsx), or one of those is clearly the best deliverable, write one short sentence and then ONE fenced code block whose language is neon-pdf, neon-docx, neon-pptx or neon-xlsx. The app turns the block into a file with a preview and a download button, so never tell the user to copy, print, save as HTML or paste it into another program.
 Block layout: optional header lines first (title: My Title, and for neon-pptx optionally theme: dark), then the content.
 - neon-pdf and neon-docx: the whole document in Markdown (# headings, paragraphs, **bold**, *italic*, lists, tables, > quotes, --- rules). No HTML.
@@ -1089,7 +1090,7 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
     .slice(-40);
   while (history.length && history[0].role !== "user") history.shift();
   if (!history.length) return res.status(400).json({ error: "No messages" });
-  const system = (String(req.user.settings?.system || "").trim().slice(0, 4000) || SYSTEM) + "\n\n" + FILE_RULES;
+  const system = (String(req.user.settings?.system || "").trim().slice(0, 4000) || SYSTEM) + "\n\n" + MATH_RULES + "\n\n" + FILE_RULES;
 
   const plan = effectivePlan(req.user);
   const use = await todayUsage(req.user.id);

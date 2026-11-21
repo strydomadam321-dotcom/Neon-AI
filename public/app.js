@@ -695,8 +695,44 @@ function artifactCard(code, lang, kind, live) {
   return card;
 }
 
+// ---------- math: $...$, $$...$$, \(...\) and \[...\] are drawn with KaTeX ----------
+const mathCache = new Map();
+function texHTML(src, display) {
+  const k = (display ? "D" : "I") + src;
+  if (mathCache.has(k)) return mathCache.get(k);
+  let out;
+  try { out = window.katex.renderToString(src.trim(), { displayMode: display, throwOnError: false, strict: "ignore", trust: false, output: "htmlAndMathml" }); }
+  catch { out = null; }
+  if (mathCache.size > 400) mathCache.clear();
+  mathCache.set(k, out);
+  return out;
+}
+// pulls maths out of the text (never from code) and leaves plain tokens that survive the markdown step
+function extractMath(text) {
+  const found = [];
+  const put = (src, display, raw) => { found.push({ src, display, raw }); return (display ? "\n\n" : "") + "zzmath" + (found.length - 1) + "zz" + (display ? "\n\n" : ""); };
+  const parts = String(text || "").split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/);
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = parts[i]
+      .replace(/\$\$([\s\S]+?)\$\$/g, (m, s) => put(s, true, m))
+      .replace(/\\\[([\s\S]+?)\\\]/g, (m, s) => put(s, true, m))
+      .replace(/\\\(([\s\S]+?)\\\)/g, (m, s) => put(s, false, m))
+      .replace(/(?<![\\$\w])\$(?![\s$])((?:\\.|[^$\\\n])+?)(?<![\s\\])\$(?![\d$\w])/g, (m, s) => put(s, false, m));
+  }
+  return { text: parts.join(""), found };
+}
+function injectMath(html, found) {
+  if (!found.length) return html;
+  return html.replace(/zzmath(\d+)zz/g, (m, n) => {
+    const f = found[Number(n)]; if (!f) return m;
+    const r = window.katex ? texHTML(f.src, f.display) : null;
+    if (!r) return DOMPurify.sanitize(f.raw.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])));
+    return f.display ? `<div class="math-block">${r}</div>` : r;
+  });
+}
 function md(text, live = false) {
-  const html = DOMPurify.sanitize(marked.parse(text || ""));
+  const mx = extractMath(text);
+  const html = injectMath(DOMPurify.sanitize(marked.parse(mx.text)), mx.found);
   const d = document.createElement("div");
   d.className = "md";
   d.innerHTML = html;
