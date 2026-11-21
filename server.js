@@ -43,7 +43,7 @@ const FREE_GEMINI_TOKENS_PER_DAY = 25000;
 const PLUS_CLAUDE_MSGS_PER_DAY = 50;
 const PLAN_IDS = ["free", "spark", "plus", "max"];
 const PLANS = [
-  { id: "free", name: "Free", price: 0, tag: "Try it out", gemini: "25k tokens / day", claude: "none" },
+  { id: "free", name: "Free", price: 0, tag: "Try it out", gemini: "25k tokens / 12h", claude: "none" },
   { id: "spark", name: "Spark", price: 5, tag: "Unlimited Gemini", gemini: "unlimited", claude: "none" },
   { id: "plus", name: "Plus", price: 12, tag: "Gemini + Claude", gemini: "unlimited", claude: "limited" },
   { id: "max", name: "Max", price: 22, tag: "Everything, unlimited", gemini: "unlimited", claude: "unlimited" },
@@ -93,7 +93,7 @@ If the content itself contains code fences, open and close the outer block with 
 // Update log shown to users once per new version (see changelog.json; newest entry first).
 const CHANGELOG = (() => { try { const j = JSON.parse(fs.readFileSync(path.join(__dirname, "changelog.json"), "utf8")); return Array.isArray(j) ? j : []; } catch { return []; } })();
 // Bump LEGAL_VERSION whenever the wording changes. CONTACT_EMAIL (environment) is where people can send privacy requests.
-const LEGAL_VERSION = "2026-11-20.3", LEGAL_UPDATED = "20 November 2026";
+const LEGAL_VERSION = "2026-11-21.1", LEGAL_UPDATED = "21 November 2026";
 const CONTACT_EMAIL = (process.env.CONTACT_EMAIL || "").trim();
 const readLegal = (n) => { try { return fs.readFileSync(path.join(__dirname, "legal", n + ".html"), "utf8"); } catch { return "<p>This document is not available right now.</p>"; } };
 const LEGAL = { terms: readLegal("terms"), privacy: readLegal("privacy") };
@@ -204,6 +204,12 @@ create table if not exists usage(
   gemini_tokens bigint not null default 0,
   claude_msgs int not null default 0,
   primary key(user_id, day)
+);
+create table if not exists usage_window(
+  user_id int primary key references users(id) on delete cascade,
+  started_at timestamptz not null default now(),
+  gemini_tokens bigint not null default 0,
+  claude_msgs int not null default 0
 );
 create table if not exists meta(key text primary key, done_at timestamptz not null default now());
 `);
@@ -701,16 +707,26 @@ app.post("/api/logout", wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Limits reset 12 hours after the FIRST use on an empty limit (a rolling window per user), not at midnight.
+const WINDOW_MS = 12 * 3600e3;
 async function todayUsage(userId) {
-  const { rows } = await q("select gemini_tokens, claude_msgs from usage where user_id=$1 and day=current_date", [userId]);
-  return { gemini: Number(rows[0]?.gemini_tokens || 0), claude: rows[0]?.claude_msgs || 0 };
+  const { rows } = await q("select gemini_tokens, claude_msgs, started_at from usage_window where user_id=$1 and started_at + interval '12 hours' > now()", [userId]);
+  const r = rows[0];
+  return { gemini: Number(r?.gemini_tokens || 0), claude: r?.claude_msgs || 0, resetAt: r ? new Date(r.started_at).getTime() + WINDOW_MS : null };
 }
+// adds usage; if the window ran out (or never started) this use starts a fresh 12-hour window
+const addUsage = (userId, tokens, msgs) => q(`insert into usage_window(user_id, started_at, gemini_tokens, claude_msgs) values($1, now(), $2, $3)
+  on conflict (user_id) do update set
+    gemini_tokens = case when usage_window.started_at + interval '12 hours' <= now() then $2 else usage_window.gemini_tokens + $2 end,
+    claude_msgs = case when usage_window.started_at + interval '12 hours' <= now() then $3 else usage_window.claude_msgs + $3 end,
+    started_at = case when usage_window.started_at + interval '12 hours' <= now() then now() else usage_window.started_at end`, [userId, Math.max(0, Math.floor(tokens || 0)), msgs || 0]);
+const resetIn = (at) => { const m = Math.max(1, Math.ceil(((at || Date.now() + WINDOW_MS) - Date.now()) / 60e3)); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
 async function mePayload(u) {
   const extra = (await q("select email_norm, email_verified, plan_chosen from users where id = $1", [u.id])).rows[0] || {};
   const dev = isDevRow(extra), plan = effectivePlan({ ...u, dev }), use = await todayUsage(u.id);
   return {
     user: { username: u.username, hasPassword: u.has_password !== false, picture: u.avatar || null, dev }, settings: u.settings,
-    plan: { id: plan, requested: u.plan_requested && u.plan_requested !== plan ? u.plan_requested : null, owner: OWNERS.has(u.username.toLowerCase()), chosen: dev || !!extra.plan_chosen, usedTokens: use.gemini, usedClaude: use.claude },
+    plan: { id: plan, requested: u.plan_requested && u.plan_requested !== plan ? u.plan_requested : null, owner: OWNERS.has(u.username.toLowerCase()), chosen: dev || !!extra.plan_chosen, usedTokens: use.gemini, usedClaude: use.claude, resetAt: use.resetAt },
   };
 }
 app.get("/api/me", requireAuth, wrap(async (req, res) => res.json(await mePayload(req.user))));
@@ -1167,12 +1183,12 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
   const use = await todayUsage(req.user.id);
   let block = "";
   if (info.provider === "gemini") {
-    if (plan === "free" && use.gemini >= FREE_GEMINI_TOKENS_PER_DAY) block = `You've used your ${FREE_GEMINI_TOKENS_PER_DAY.toLocaleString()} free Gemini tokens for today. They reset at midnight UTC. Upgrade to Spark for unlimited Gemini.`;
+    if (plan === "free" && use.gemini >= FREE_GEMINI_TOKENS_PER_DAY) block = `You've used your ${FREE_GEMINI_TOKENS_PER_DAY.toLocaleString()} free Gemini tokens. They reset in ${resetIn(use.resetAt)}. Upgrade to Spark for unlimited Gemini.`;
   } else if (!claudeAllowed(plan, info.id)) {
     block = plan === "plus" ? "Opus is included with the Max plan. Pick Sonnet or Haiku, or upgrade to Max."
       : "Claude models are part of the Plus and Max plans. Pick a Gemini model, or upgrade your plan.";
   } else if (plan === "plus" && use.claude >= PLUS_CLAUDE_MSGS_PER_DAY) {
-    block = `You've reached today's ${PLUS_CLAUDE_MSGS_PER_DAY} Claude messages on Plus. Use Gemini (unlimited), or upgrade to Max for unlimited Claude.`;
+    block = `You've used your ${PLUS_CLAUDE_MSGS_PER_DAY} Claude messages on Plus. They reset in ${resetIn(use.resetAt)}. Use Gemini (unlimited), or upgrade to Max for unlimited Claude.`;
   }
   if (block) return res.status(403).json({ error: block, upgrade: true });
 
@@ -1221,8 +1237,8 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
         }
       }
       if (!ok) { send({ down: lastErr?.status === 429 ? "limit" : "down" }); console.warn("Gemini fallbacks all failed:", lastErr?.status, String(lastErr?.message || "").slice(0, 160)); }
-      if (used > 0) q("insert into usage(user_id,day,gemini_tokens) values($1,current_date,$2) on conflict(user_id,day) do update set gemini_tokens = usage.gemini_tokens + $2", [req.user.id, used]).catch(() => {});
-      send({ done: true, tokens: use.gemini + (used || 0) });
+      if (used > 0) addUsage(req.user.id, used, 0).catch(() => {});
+      send({ done: true, tokens: use.gemini + (used || 0), reset: use.resetAt || (used > 0 ? Date.now() + WINDOW_MS : null) });
     } else {
       const cfg = CLAUDE_THINK[effort];
       let gotText = false, acc = "";
@@ -1286,8 +1302,8 @@ app.post("/api/chat", requireAuth, big, async (req, res) => {
       }
       if (final.stop_reason === "refusal") send({ t: "\n\n*(The model declined to answer this request.)*" });
       if (final.stop_reason === "max_tokens") send({ t: "\n\n*(Reached max length.)*" });
-      q("insert into usage(user_id,day,claude_msgs) values($1,current_date,1) on conflict(user_id,day) do update set claude_msgs = usage.claude_msgs + 1", [req.user.id]).catch(() => {});
-      send({ done: true, usage: final.usage });
+      addUsage(req.user.id, 0, 1).catch(() => {});
+      send({ done: true, usage: final.usage, reset: use.resetAt || Date.now() + WINDOW_MS });
     }
   } catch (err) {
     if (err?.name !== "AbortError" && !res.writableEnded) send({ error: friendlyError(err) });
@@ -1344,7 +1360,7 @@ Rules: reply with ONE or TWO short sentences (under 30 words) of casual chat, th
   let out;
   try { out = await geminiOnce({ model: CHESS_MODEL, system, user }); }
   catch (e) { console.error("chess talk failed:", e.message); return res.json({ text: "", unavailable: true }); }
-  if (out.tokens > 0) q("insert into usage(user_id,day,gemini_tokens) values($1,current_date,$2) on conflict(user_id,day) do update set gemini_tokens = usage.gemini_tokens + $2", [req.user.id, out.tokens]).catch(() => {});
+  if (out.tokens > 0) addUsage(req.user.id, out.tokens, 0).catch(() => {});
   const text = clip(out.text.replace(/^["'“”]+|["'“”]+$/g, "").replace(new RegExp("^" + name + "\\s*:\\s*", "i"), ""), 280);
   res.json({ text });
 }));
@@ -1389,7 +1405,7 @@ Answer in at most 90 words, in simple words, defining any jargon. If the questio
   let out;
   try { out = await geminiOnce({ model: CHESS_MODEL, system, user, maxOut, temperature: mode === "scenario" ? 1 : 0.7 }); }
   catch (e) { console.error("larp ai failed:", e.message); return res.json({ text: "", unavailable: true }); }
-  if (out.tokens > 0) q("insert into usage(user_id,day,gemini_tokens) values($1,current_date,$2) on conflict(user_id,day) do update set gemini_tokens = usage.gemini_tokens + $2", [req.user.id, out.tokens]).catch(() => {});
+  if (out.tokens > 0) addUsage(req.user.id, out.tokens, 0).catch(() => {});
   if (mode === "scenario") {
     let j = null; try { const m = out.text.match(/\{[\s\S]*\}/); j = m && JSON.parse(m[0]); } catch {}
     const tk = String(j && j.ticker || "").toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4);

@@ -1,5 +1,17 @@
 [
   {
+    "version": "2.3",
+    "date": "21 November 2026",
+    "title": "NEON AI V2.3",
+    "tag": "Update",
+    "items": [
+      {
+        "icon": "⏱️",
+        "text": "<b>Limits reset every 12 hours.</b> Your timer starts when you send your first message on an empty limit, and the usage pop-up shows exactly how long is left, down to the second."
+      }
+    ]
+  },
+  {
     "version": "2.2.4",
     "date": "21 November 2026",
     "title": "NEON AI V2.2.4",
@@ -103,7 +115,7 @@
       },
       {
         "icon": "📊",
-        "text": "<b>Daily usage ring.</b> A ring beside your name shows how much of today's limit you have used. Click it for the details, and find the same info in Settings."
+        "text": "<b>Daily usage ring.</b> A ring beside your name shows how much of your limit you have used. Click it for the details, and find the same info in Settings."
       },
       {
         "icon": "📄",

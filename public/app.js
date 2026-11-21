@@ -18,7 +18,7 @@ const ls = {
 // ---------- state ----------
 let config = { hasGoogle: false, mailReady: true, models: [], defaultModel: "", plans: [], freeTokens: 25000, plusClaudeMsgs: 50, hasKey: true, hasGemini: false, defaultEffort: 1 };
 let user = null;
-let plan = { id: "free", requested: null, owner: false, usedTokens: 0, usedClaude: 0 };
+let plan = { id: "free", requested: null, owner: false, usedTokens: 0, usedClaude: 0, resetAt: null };
 const readLook = () => { try { return JSON.parse(localStorage.getItem("neon-look") || "{}") || {}; } catch { return {}; } };
 let settings = { system: "", model: "", effort: 1, retro: true, bg: true, flicker: true, gfx: readLook().gfx === "gpu" ? "gpu" : "cpu" };
 let chats = [];          // metadata list for the sidebar: {id,title,model,created,updated}
@@ -392,9 +392,9 @@ function showAuth(msg = "") {
 
 // ---------- plans ----------
 const PLAN_COPY = {
-  free: { badge: "", feats: ["25,000 Gemini tokens a day", "Gemini 3.5 Flash-Lite and 2.5 Flash", "Chats synced on every device", "Images, PDFs, Word and PowerPoint"], off: [], support: "Community support" },
+  free: { badge: "", feats: ["25,000 Gemini tokens every 12 hours", "Gemini 3.5 Flash-Lite and 2.5 Flash", "Chats synced on every device", "Images, PDFs, Word and PowerPoint"], off: [], support: "Community support" },
   spark: { badge: "", feats: ["Unlimited Gemini, no daily cap", "Gemini 3.5 Flash-Lite and 2.5 Flash", "Chats synced on every device", "Images, PDFs, Word and PowerPoint"], off: [], support: "Email support" },
-  plus: { badge: "Popular", feats: ["Everything in Spark", "Claude Sonnet and Haiku", "Fair use: 50 Claude messages a day", "Unlimited Gemini"], off: [], support: "Priority email support" },
+  plus: { badge: "Popular", feats: ["Everything in Spark", "Claude Sonnet and Haiku", "Fair use: 50 Claude messages every 12 hours", "Unlimited Gemini"], off: [], support: "Priority email support" },
   max: { badge: "Best value", feats: ["Everything in Plus", "Claude Opus, the smartest model", "No limit on Claude messages", "Early access to new features"], off: [], support: "Priority support, answered first" },
 };
 const tickIc = () => icon("check");
@@ -479,7 +479,7 @@ function renderPlanSettings() {
   const p = config.plans.find((x) => x.id === plan.id) || { name: "Free" };
   $("planName").textContent = user?.dev ? "Developer" : p.name + (plan.owner ? " (owner)" : "");
   const req = plan.requested ? ` Requested: ${config.plans.find((x) => x.id === plan.requested)?.name}, switches on when payments open.` : "";
-  $("planSub").textContent = (plan.id === "free" ? "Gemini only, with a daily token limit." : plan.id === "plus" ? "Unlimited Gemini, plus Claude Sonnet and Haiku." : user?.dev ? "Dev account: full access, no limits." : plan.id === "max" ? "Everything, unlimited." : "Unlimited Gemini.") + req;
+  $("planSub").textContent = (plan.id === "free" ? "Gemini only, with a token limit that resets every 12 hours." : plan.id === "plus" ? "Unlimited Gemini, plus Claude Sonnet and Haiku." : user?.dev ? "Dev account: full access, no limits." : plan.id === "max" ? "Everything, unlimited." : "Unlimited Gemini.") + req;
   renderUsage();
 }
 // ---------- daily usage: the ring beside your name, its pop-up, and the Settings section ----------
@@ -494,16 +494,23 @@ function usageInfo() {
   const top = rows.filter((r) => r.on && r.limit).sort((a, b) => b.pct - a.pct)[0] || null;   // the one you've used the most of
   return { rows, top };
 }
-const resetText = () => { const n = new Date(), t = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1)); return "Resets " + t.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }); };
+// limits reset 12 hours after the first message on an empty limit: show the time left, with seconds, counting down live
+const fmtLeft = (ms) => { const t = Math.max(0, Math.ceil(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60, p = (n) => String(n).padStart(2, "0"); return h ? `${h}h ${p(m)}m ${p(s)}s` : m ? `${m}m ${p(s)}s` : `${s}s`; };
+const resetText = () => (plan.resetAt && plan.resetAt > Date.now() ? "Resets in " + fmtLeft(plan.resetAt - Date.now()) : "Resets 12h after your first message");
+setInterval(() => {                                                // tick every second while the numbers are on screen
+  if (!user) return;
+  if (plan.resetAt && plan.resetAt <= Date.now()) { plan.resetAt = null; plan.usedTokens = 0; plan.usedClaude = 0; renderUsage(); return; }
+  document.querySelectorAll(".rst").forEach((e) => (e.textContent = resetText()));
+}, 1000);
 function usageRowsHTML() {
   const { rows } = usageInfo();
   let h = rows.map((r) => {
     const hot = r.pct >= 85 ? "hot" : "";
     const right = !r.on ? "Not on your plan" : r.limit ? resetText() : "Unlimited";
-    const foot = r.on ? `${r.used.toLocaleString()}${r.limit ? " of " + r.limit.toLocaleString() : ""} ${r.unit} today` : "Claude comes with Plus and Max";
-    return `<div class="up-row${r.on ? "" : " off"}"><div class="up-l"><b>${r.name}</b><span>${right}</span>${r.limit ? `<strong class="${hot}">${r.pct}%</strong>` : ""}</div>${r.limit ? `<div class="usage-bar"><i class="${hot}" style="width:${r.pct}%"></i></div>` : ""}<small>${foot}</small></div>`;
+    const foot = r.on ? `${r.used.toLocaleString()}${r.limit ? " of " + r.limit.toLocaleString() : ""} ${r.unit} used` : "Claude comes with Plus and Max";
+    return `<div class="up-row${r.on ? "" : " off"}"><div class="up-l"><b>${r.name}</b><span${r.limit && r.on ? ' class="rst"' : ""}>${right}</span>${r.limit ? `<strong class="${hot}">${r.pct}%</strong>` : ""}</div>${r.limit ? `<div class="usage-bar"><i class="${hot}" style="width:${r.pct}%"></i></div>` : ""}<small>${foot}</small></div>`;
   }).join("");
-  if (user?.dev) { const t = devTier(); h += `<div class="up-dev"><span class="inf ${t ? "" : "rainbow"}" style="${t ? "--ic:" + t.color : ""}">∞</span><span>${t ? t.name + ": under " + ((t.i + 1) * 20) + "k Gemini tokens today" : "Rainbow: over 120k Gemini tokens today"}</span></div>`; }
+  if (user?.dev) { const t = devTier(); h += `<div class="up-dev"><span class="inf ${t ? "" : "rainbow"}" style="${t ? "--ic:" + t.color : ""}">∞</span><span>${t ? t.name + ": under " + ((t.i + 1) * 20) + "k Gemini tokens in this 12-hour window" : "Rainbow: over 120k Gemini tokens in this 12-hour window"}</span></div>`; }
   return h;
 }
 let usageOpen = false;
@@ -515,16 +522,16 @@ function renderUsage() {
   else if (top) {
     const C = 2 * Math.PI * 10, col = top.pct >= 85 ? "#ff5c7a" : top.pct >= 60 ? "#ffb347" : "var(--cyan)";
     btn.innerHTML = `<svg viewBox="0 0 26 26"><circle class="tr" cx="13" cy="13" r="10"/><circle class="pg" cx="13" cy="13" r="10" style="--rc:${col};stroke-dasharray:${C.toFixed(1)};stroke-dashoffset:${(C * (1 - top.pct / 100)).toFixed(1)}"/></svg>`;
-    btn.title = `${top.pct}% of today's ${top.name} limit used`;
+    btn.title = `${top.pct}% of your ${top.name} limit used`;
   } else { btn.innerHTML = `<span class="inf dim">∞</span>`; btn.title = "Unlimited"; }
   const pop = $("usagePop");
-  pop.innerHTML = `<div class="up-h"><b>${dev ? "Developer" : "Daily usage · " + (config.plans.find((x) => x.id === plan.id)?.name || "Free")}</b><button type="button" class="up-all">See all →</button></div>${usageRowsHTML()}`;
+  pop.innerHTML = `<div class="up-h"><b>${dev ? "Developer" : "Usage · " + (config.plans.find((x) => x.id === plan.id)?.name || "Free")}</b><button type="button" class="up-all">See all →</button></div>${usageRowsHTML()}`;
   pop.querySelector(".up-all").onclick = () => { toggleUsage(false); openSettings(); setTimeout(() => $("usageBox").scrollIntoView({ behavior: "smooth", block: "center" }), 60); };
   $("usageBox").innerHTML = usageRowsHTML();
 }
 function toggleUsage(on) {
   usageOpen = on == null ? !usageOpen : on; $("usagePop").classList.toggle("open", usageOpen);
-  if (usageOpen) api("/api/me", { noAuthRedirect: true }).then((d) => { if (usageOpen && d && d.plan) { plan = { ...plan, usedTokens: d.plan.usedTokens, usedClaude: d.plan.usedClaude }; renderUsage(); } }).catch(() => {});
+  if (usageOpen) api("/api/me", { noAuthRedirect: true }).then((d) => { if (usageOpen && d && d.plan) { plan = { ...plan, usedTokens: d.plan.usedTokens, usedClaude: d.plan.usedClaude, resetAt: d.plan.resetAt }; renderUsage(); } }).catch(() => {});
 }
 $("usageBtn").onclick = (e) => { e.stopPropagation(); toggleUsage(); };
 document.addEventListener("mousedown", (e) => { if (usageOpen && !e.target.closest("#usagePop, #usageBtn")) toggleUsage(false); });
@@ -1088,6 +1095,7 @@ async function streamReply() {
         if (ev.down) downNote = ev.down;
         if (ev.src) ev.src.forEach((s) => { if (s.u && !sources.some((x) => x.u === s.u)) sources.push(s); });
         if (ev.error) errMsg = ev.error;
+        if (ev.reset) plan.resetAt = ev.reset;
         if (ev.tokens != null) { plan.usedTokens = ev.tokens; renderPlanSettings(); }
       }
     }
@@ -1099,7 +1107,7 @@ async function streamReply() {
   if (!user) return;
   if (downNote && !text) dialog({ title: downNote === "limit" ? "Gemini's limit is used up" : "Gemini is having trouble", message: downNote === "limit" ? "Gemini's free limit is used up for now. Try again in a little while." : "Sorry, gemini server might be down rn.", ok: "OK", cancel: false });
   if (text || errMsg) chat.messages.push({ role: "assistant", text, ...(errMsg ? { err: errMsg, errModel: usedModel } : {}), ...(searched && acts.length ? { acts: acts.map((a) => ({ k: a.k, t: a.t.replace(/^Searching the web for/, "Searched the web for") })), sources: sources.slice(0, 8) } : {}) });
-  if (text && !errMsg && config.models.find((m) => m.id === usedModel)?.provider === "claude") { plan.usedClaude++; renderUsage(); }
+  if (text && !errMsg && config.models.find((m) => m.id === usedModel)?.provider === "claude") { plan.usedClaude++; if (!plan.resetAt) plan.resetAt = Date.now() + 12 * 3600e3; renderUsage(); }
   const saved = await persist(chat);
   if (current === chat) renderMessages();
   if (saved && !errMsg && text && chat.messages.length === 2) autoTitle(chat);
