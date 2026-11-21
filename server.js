@@ -482,7 +482,8 @@ function checkSignupFields({ username, password, email }) {
 const SIGNUPS_OPEN = process.env.SIGNUPS_OPEN === "1";
 const gates = new Map(), passes = new Map();
 const skips = new Map();
-const SKIP_MS = Number(process.env.SKIP_WATCH_MS) || 10 * 3600e3;           // the "this is too hard" way in: watching paint dry for 10 hours
+const SKIP_MS = Number(process.env.SKIP_WATCH_MS) || 10 * 3600e3;
+const ORB_GAP_MS = Number(process.env.ORB_GAP_MS) || 4500, ORB_LIFE_MS = Number(process.env.ORB_LIFE_MS) || 12000;   // bonus circles: at most one every ~5 s, claimable for a few seconds           // the "this is too hard" way in: watching paint dry for 10 hours
 setInterval(() => { const now = Date.now(); for (const [k, g] of gates) if (now - g.at > 2 * 3600e3) gates.delete(k); for (const [k, v] of passes) if (v.exp < now) passes.delete(k); for (const [k, v] of skips) if (now - v.start > SKIP_MS + 8 * 3600e3) skips.delete(k); }, 5 * 60e3).unref();
 const gateOk = (req) => { const t = String(req.body?.pass || ""); const v = passes.get(t); return !!(v && v.exp > Date.now() && v.uses < 5 && (v.uses++, true)); };
 const needGate = (req, res) => {
@@ -525,13 +526,28 @@ app.post("/api/riddle/skip/start", small, wrap(async (req, res) => {
   if (SIGNUPS_OPEN) return res.json({ open: true });
   if (limited("skipstart:" + req.ip, 10, 3600e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
   if (skips.size > 5000) return res.status(503).json({ error: "The paint is busy drying. Try again in a bit." });
-  const ticket = crypto.randomBytes(16).toString("hex"); skips.set(ticket, { start: Date.now() });
+  const ticket = crypto.randomBytes(16).toString("hex"); skips.set(ticket, { start: Date.now(), credit: 0, lastOrb: 0, orbs: new Map() });
   res.json({ ticket, ms: SKIP_MS });
+}));
+// a bonus circle: the server decides when one appears and how many minutes it is worth (1 to 10); catching it (a claim) credits that time
+app.post("/api/riddle/skip/orb", small, wrap(async (req, res) => {
+  const t = skips.get(String(req.body?.ticket || "")); if (!t) return res.status(404).json({ error: "This run has ended.", gone: true });
+  const now = Date.now(); if (now - t.lastOrb < ORB_GAP_MS) return res.status(429).json({ error: "Too soon.", wait: ORB_GAP_MS - (now - t.lastOrb) });
+  t.lastOrb = now; for (const [k, o] of t.orbs) if (now - o.at > ORB_LIFE_MS * 2) t.orbs.delete(k);
+  const orb = crypto.randomBytes(8).toString("hex"), minutes = crypto.randomInt(1, 11); t.orbs.set(orb, { at: now, minutes });
+  res.json({ orb, minutes });
+}));
+app.post("/api/riddle/skip/claim", small, wrap(async (req, res) => {
+  const t = skips.get(String(req.body?.ticket || "")); if (!t) return res.status(404).json({ error: "This run has ended.", gone: true });
+  const id = String(req.body?.orb || ""), o = t.orbs.get(id); t.orbs.delete(id);
+  if (!o || Date.now() - o.at > ORB_LIFE_MS) return res.status(404).json({ error: "Too slow. It got away." });
+  t.credit += o.minutes * 60e3;
+  res.json({ ok: true, minutes: o.minutes });
 }));
 app.post("/api/riddle/skip/finish", small, wrap(async (req, res) => {
   const ticket = String(req.body?.ticket || ""), t = skips.get(ticket);
   if (!t) return res.status(404).json({ error: "This run has ended. Start again.", gone: true });
-  const left = t.start + SKIP_MS - Math.min(60e3, SKIP_MS / 20) - Date.now();
+  const left = t.start + SKIP_MS - t.credit - Math.min(60e3, SKIP_MS / 20) - Date.now();      // real time watched + minutes won from the bonus circles
   if (left > 0) return res.status(425).json({ error: "The paint isn't dry yet.", left: Math.ceil(left / 1000) });
   skips.delete(ticket);
   const pass = crypto.randomBytes(24).toString("hex"); passes.set(pass, { exp: Date.now() + 20 * 60e3, uses: 0 });

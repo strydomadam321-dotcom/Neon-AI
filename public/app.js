@@ -192,7 +192,58 @@ function loadYT() {
   }));
 }
 function pdSay(t, kind) { const m = $("pdMsg"); m.className = "rg-msg " + (kind || ""); m.textContent = t || ""; }
+// bonus circles: one appears every 5 to 9 seconds, worth +1 to +10 minutes (the server decides), and it runs away from the cursor, so it has to be chased
+let orbT = 0, orbRaf = 0, orb = null, orbMouse = null;
+function scheduleOrb() { clearTimeout(orbT); if (pd) orbT = setTimeout(spawnOrb, 5000 + Math.random() * 4000); }
+async function spawnOrb() {
+  if (!pd || !pd.player) return;
+  if (!orb) {
+    try { const d = await api("/api/riddle/skip/orb", { method: "POST", noAuthRedirect: true, body: { ticket: pd.ticket } }); if (pd) showOrb(d.orb, d.minutes); } catch {}
+  }
+  scheduleOrb();
+}
+function killOrb(cls) {
+  cancelAnimationFrame(orbRaf); if (!orb) return; const el = orb.el; orb = null;
+  el.classList.add(cls || "gone"); setTimeout(() => el.remove(), 450);
+}
+function showOrb(id, minutes) {
+  const box = document.querySelector(".pd-video"), W = box.clientWidth, H = box.clientHeight, S = 58;
+  const el = document.createElement("button"); el.type = "button"; el.className = "pd-orb"; el.setAttribute("aria-label", `Bonus: skip ${minutes} minutes`); el.innerHTML = `<b>+${minutes}m</b>`; box.appendChild(el);
+  const o = orb = { el, id, minutes, x: Math.random() * (W - S), y: Math.random() * (H - S), vx: 0, vy: 0, born: performance.now(), last: performance.now(), S };
+  const a = Math.random() * 6.283; o.vx = Math.cos(a) * 150; o.vy = Math.sin(a) * 150;
+  el.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); catchOrb(o); });
+  const frame = (now) => {
+    if (orb !== o) return;
+    const dt = Math.min(0.05, (now - o.last) / 1000); o.last = now; const w = box.clientWidth - S, h = box.clientHeight - S;
+    o.vx += (Math.random() - 0.5) * 520 * dt; o.vy += (Math.random() - 0.5) * 520 * dt;                    // wanders
+    let speed = 150;
+    if (orbMouse) {                                                                                         // ...and runs from the cursor
+      const dx = o.x + S / 2 - orbMouse.x, dy = o.y + S / 2 - orbMouse.y, d = Math.hypot(dx, dy);
+      if (d < 150) { const k = (150 - d) / 150; o.vx += (dx / (d || 1)) * 1500 * k * dt; o.vy += (dy / (d || 1)) * 1500 * k * dt; speed = 150 + 170 * k; }
+    }
+    const v = Math.hypot(o.vx, o.vy) || 1, cap = Math.min(v, speed * 1.5 + 30); o.vx = (o.vx / v) * cap; o.vy = (o.vy / v) * cap;
+    o.x += o.vx * dt; o.y += o.vy * dt;
+    if (o.x < 0) { o.x = 0; o.vx = Math.abs(o.vx); o.vy += (Math.random() - 0.5) * 200; } else if (o.x > w) { o.x = w; o.vx = -Math.abs(o.vx); o.vy += (Math.random() - 0.5) * 200; }
+    if (o.y < 0) { o.y = 0; o.vy = Math.abs(o.vy); o.vx += (Math.random() - 0.5) * 200; } else if (o.y > h) { o.y = h; o.vy = -Math.abs(o.vy); o.vx += (Math.random() - 0.5) * 200; }
+    el.style.transform = `translate3d(${o.x}px,${o.y}px,0)`;
+    const age = now - o.born; if (age > 4300) el.classList.add("fading");
+    if (age > 5000) { pdSay("It got away.", ""); killOrb("gone"); return; }
+    orbRaf = requestAnimationFrame(frame);
+  };
+  el.style.transform = `translate3d(${o.x}px,${o.y}px,0)`; orbRaf = requestAnimationFrame(frame);
+}
+async function catchOrb(o) {
+  if (orb !== o || !pd) return; const ticket = pd.ticket; killOrb("pop");
+  try {
+    const d = await api("/api/riddle/skip/claim", { method: "POST", noAuthRedirect: true, body: { ticket, orb: o.id } });
+    if (!pd) return; let dur = pd.need; try { dur = pd.player.getDuration() || pd.need; } catch {}
+    pd.max = Math.min(pd.max + d.minutes * 60, dur - 1); pd.wall = Date.now();
+    try { pd.player.seekTo(pd.max, true); } catch {}
+    pdSay(`Caught it! Jumped ahead ${d.minutes} minute${d.minutes > 1 ? "s" : ""}.`, "good"); paintTick();
+  } catch (e) { pdSay(e.message || "It got away.", "bad"); }
+}
 function stopPaint() {
+  clearTimeout(orbT); killOrb("gone"); orbMouse = null;
   if (!pd) return; clearInterval(pd.timer); try { pd.player && pd.player.destroy(); } catch {}
   pd = null; const o = $("paintDry"); o.classList.add("out"); setTimeout(() => { if (!pd) { o.classList.add("hidden"); o.classList.remove("out"); $("pdPlayer").outerHTML = '<div id="pdPlayer"></div>'; } }, 260);
 }
@@ -216,7 +267,7 @@ async function openPaint() {
         onError: () => { pdSay("This video can't be played here, so the paint will stay wet. Go back and try the riddles.", "bad"); },
       },
     });
-    pd.timer = setInterval(paintTick, 500);
+    pd.timer = setInterval(paintTick, 500); scheduleOrb();
   } catch (e) { toast(e.message || "Couldn't start the video.", "err"); stopPaint(); }
   finally { btn.disabled = false; }
 }
@@ -243,6 +294,7 @@ async function finishPaint() {
 $("rgHard").onclick = openPaint; $("pdQuit").onclick = stopPaint;
 $("pdSound").onclick = () => { const p = pd && pd.player; if (!p) return; try { if (p.isMuted()) { p.unMute(); $("pdSound").textContent = "Mute"; } else { p.mute(); $("pdSound").textContent = "Unmute"; } } catch {} };
 $("pdShield").addEventListener("contextmenu", (e) => e.preventDefault());
+{ const vb = document.querySelector(".pd-video"); vb.addEventListener("pointermove", (e) => { const r = vb.getBoundingClientRect(); orbMouse = { x: e.clientX - r.left, y: e.clientY - r.top }; }); vb.addEventListener("pointerleave", () => (orbMouse = null)); }
 $("fRiddle").addEventListener("animationend", () => $("fRiddle").classList.remove("bad"));
 addEventListener("beforeunload", (e) => { if ((pd || riddle.i > 0) && !riddle.pass && !$("auth").classList.contains("hidden")) { e.preventDefault(); e.returnValue = ""; } });   // leaving wipes the progress
 $("backBtn3").onclick = () => { clearInterval(timers[""]); goStep(2); };
