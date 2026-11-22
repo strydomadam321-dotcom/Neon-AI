@@ -261,6 +261,22 @@ function paintAvatar(el, name, pic) {
 }
 const authEls = { form: $("authForm"), user: $("username"), pass: $("password"), err: $("authErr"), btn: $("authSubmit") };
 
+// "Create account" while sign-ups are closed: the form and the notice swap places with the same springy height morph as the sign-up steps
+let closedShown = false, swapT = 0;
+function showClosedNote(on, instant) {
+  if (on === closedShown) return;
+  const wrap = $("authBody"), form = $("formC"), note = $("closedC");
+  clearTimeout(swapT); [form, note].forEach((e) => e.classList.remove("swap-out", "swap-in"));      // a quick second click finishes the first swap at once
+  closedShown = on; const from = on ? form : note, to = on ? note : form;
+  if (instant || !wrap.offsetParent) { from.hidden = true; to.hidden = false; wrap.style.height = ""; wrap.classList.remove("morphing"); return; }
+  const h0 = wrap.getBoundingClientRect().height; wrap.style.height = h0 + "px"; wrap.classList.add("morphing"); from.classList.add("swap-out");
+  swapT = setTimeout(() => {
+    from.hidden = true; from.classList.remove("swap-out"); to.hidden = false; to.classList.add("swap-in");
+    wrap.style.height = "auto"; const h1 = wrap.getBoundingClientRect().height; wrap.style.height = h1 + "px";
+    const an = wrap.animate([{ height: h0 + "px" }, { height: h1 + "px" }], { duration: 700, easing: SPRING });
+    an.onfinish = an.oncancel = () => { wrap.style.height = ""; wrap.classList.remove("morphing"); to.classList.remove("swap-in"); };
+  }, 220);
+}
 function setMode(m, instant) {
   mode = m;
   document.querySelector(".tabs").dataset.mode = m;
@@ -271,7 +287,7 @@ function setMode(m, instant) {
   $("strengthC").classList.toggle("open", m === "signup");
   $("stepperC").classList.toggle("open", m === "signup");
   const closed = m === "signup" && config.signupsOpen !== true;        // sign-ups are switched off for now: show the notice instead of the form
-  $("formC").classList.toggle("open", !closed); $("closedC").classList.toggle("open", closed);
+  showClosedNote(closed, instant);
   if (step !== 1) goStep(1, instant); else syncStep(!instant);
   authEls.err.textContent = "";
   document.querySelectorAll(".field.bad").forEach((f) => f.classList.remove("bad"));

@@ -1257,3 +1257,8 @@ body.in-app .rs-dim { opacity: 1; }
 .inb-none, .inb-empty { color: var(--dim); text-align: center; padding: 44px 10px; font-size: 14px; } .inb-back { display: none; }
 @media (max-width: 760px) { .inb-body { grid-template-columns: 1fr; } .inb-detail { display: none; } .inb-body.show-detail .inb-list { display: none; } .inb-body.show-detail .inb-detail { display: block; } .inb-back { display: inline-flex; } .inb-card { height: 92vh; padding: 14px; } }
 #dialog { z-index: 90; }   /* confirmations must sit above the support pop-up and the inbox */
+
+/* sign-up closed: the form and the notice swap with a blur fade and the springy height morph */
+.authbody.morphing { overflow: hidden; }
+.swap-out { opacity: 0; transform: translateY(-6px); filter: blur(5px); transition: opacity .2s, transform .2s, filter .2s; }
+.swap-in { animation: swapIn .55s cubic-bezier(.2, .9, .25, 1) both; } @keyframes swapIn { from { opacity: 0; transform: translateY(10px); filter: blur(6px); } }
