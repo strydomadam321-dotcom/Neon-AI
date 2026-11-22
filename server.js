@@ -509,6 +509,10 @@ app.post("/api/support", small, wrap(async (req, res) => {
   res.json({ ok: true, ref: "NEON-" + rows[0].id });
 }));
 const devOnly = (req, res) => { if (req.user.dev) return false; res.status(403).json({ error: "Not allowed." }); return true; };
+app.get("/api/dev/tickets/count", requireAuth, wrap(async (req, res) => {
+  if (devOnly(req, res)) return;
+  res.json((await q("select count(*) filter (where status = 'open')::int as open, count(*) filter (where not seen)::int as unseen from support_tickets")).rows[0]);
+}));
 app.get("/api/dev/tickets", requireAuth, wrap(async (req, res) => {
   if (devOnly(req, res)) return;
   const rows = (await q(`select id, name, email, category, subject, message, status, seen, user_id, created_at from support_tickets order by (status = 'open') desc, created_at desc limit 300`)).rows;

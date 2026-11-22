@@ -1682,8 +1682,13 @@ $("clearAll").onclick = async () => {
 function devTicketCount(c) {
   const n = c ? c.open : 0, el = $("devTicketsCount"); el.textContent = n; el.hidden = !n;
   $("settingsBtn").classList.toggle("has-unread", !!(c && c.unseen));              // a dot on the settings button while there are new tickets
+  const u = c ? c.unseen : 0, bd = $("ticketsBadge"), shown = u > 0 ? (u > 99 ? "99+" : String(u)) : "";
+  if (bd.textContent !== shown) { bd.textContent = shown; bd.hidden = !shown; if (shown) { bd.classList.remove("pop"); void bd.offsetWidth; bd.classList.add("pop"); } }   // the red-pink circle on the top-right of the ticket button
+  $("ticketsTop").title = u ? `Support tickets (${u} new)` : "Support tickets";
 }
+setInterval(() => { if (user && user.dev && document.visibilityState === "visible") api("/api/dev/tickets/count", { noAuthRedirect: true }).then(devTicketCount).catch(() => {}); }, 45000);
 NeonSupport.init({ api, toast, dialog, icon, onCount: devTicketCount });
+$("ticketsTop").onclick = () => NeonSupport.openInbox();
 $("devTickets").onclick = () => { closeSettings(true); setTimeout(() => NeonSupport.openInbox(), 150); };
 $("nukeBtn").onclick = async () => {
   if (!user?.dev) return;
@@ -1781,6 +1786,7 @@ async function enterApp(data) {
   let kept = ""; try { kept = sessionStorage.getItem("neon-model") || ""; } catch {}   // a refresh keeps the model; a fresh open starts on the default
   els.model.value = okModel(kept) ? kept : okModel(config.defaultModel) ? config.defaultModel : okModel(settings.model) ? settings.model : (config.models.find((m) => !modelLocked(m.id)) || config.models[0]).id;
   buildModelMenu(); renderPlanSettings(); $("devSec").hidden = !user.dev;
+  $("ticketsTop").hidden = !user.dev;
   if (user.dev) { devTicketCount(data.tickets); if (data.tickets && data.tickets.unseen) toast(`You have ${data.tickets.unseen} new support ticket${data.tickets.unseen > 1 ? "s" : ""}.`); }
   if (config.hasKey === false) $("emptyMsg").textContent = "The server has no ANTHROPIC_API_KEY yet. Add it in Render's environment settings.";
   els.search.value = "";

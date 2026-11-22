@@ -131,6 +131,7 @@
         <button type="button" class="btn small" id="inbToggle">${cur.status === "open" ? "Mark resolved" : "Reopen"}</button><button type="button" class="btn small danger" id="inbDel">${H.icon("trash")}<span>Delete</span></button></div>`
       : `<div class="inb-none">Select a ticket to read it</div>`;
     const bk = $("#inbBack"); if (bk) bk.onclick = () => $("#inbBody").classList.remove("show-detail");
+    if (cur && !cur.seen) markSeen(cur.id);                          // a ticket you are looking at counts as seen
     if (cur) { $("#inbToggle").onclick = () => act(cur, cur.status === "open" ? "resolve" : "reopen"); $("#inbDel").onclick = () => remove(cur); }
   }
   async function act(t, action) {
