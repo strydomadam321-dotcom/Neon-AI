@@ -279,6 +279,7 @@ function setMode(m, instant) {
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => { if (t.dataset.mode !== mode) setMode(t.dataset.mode); }));
 
 $("closedBack").onclick = () => setMode("login");
+$("closedSupport").onclick = () => NeonSupport.open({ suggest: "account" });
 $("googleBtn").onclick = googleGo; $("googleBtn2").onclick = googleGo;
 addEventListener("pageshow", (e) => { if (e.persisted) googleBusy(false); });   // coming back from Google with the Back button
 $("togglePw").onclick = () => {
@@ -1661,6 +1662,13 @@ $("clearAll").onclick = async () => {
     chats = []; startNew(); closeSettings(true); toast("All chats deleted.");
   } catch (err) { toast(err.message, "err"); }
 };
+// ---------- support tickets (public pop-up and the dev inbox live in support.js) ----------
+function devTicketCount(c) {
+  const n = c ? c.open : 0, el = $("devTicketsCount"); el.textContent = n; el.hidden = !n;
+  $("settingsBtn").classList.toggle("has-unread", !!(c && c.unseen));              // a dot on the settings button while there are new tickets
+}
+NeonSupport.init({ api, toast, dialog, icon, onCount: devTicketCount });
+$("devTickets").onclick = () => { closeSettings(true); setTimeout(() => NeonSupport.openInbox(), 150); };
 $("nukeBtn").onclick = async () => {
   if (!user?.dev) return;
   const ok1 = await dialog({
@@ -1757,6 +1765,7 @@ async function enterApp(data) {
   let kept = ""; try { kept = sessionStorage.getItem("neon-model") || ""; } catch {}   // a refresh keeps the model; a fresh open starts on the default
   els.model.value = okModel(kept) ? kept : okModel(config.defaultModel) ? config.defaultModel : okModel(settings.model) ? settings.model : (config.models.find((m) => !modelLocked(m.id)) || config.models[0]).id;
   buildModelMenu(); renderPlanSettings(); $("devSec").hidden = !user.dev;
+  if (user.dev) { devTicketCount(data.tickets); if (data.tickets && data.tickets.unseen) toast(`You have ${data.tickets.unseen} new support ticket${data.tickets.unseen > 1 ? "s" : ""}.`); }
   if (config.hasKey === false) $("emptyMsg").textContent = "The server has no ANTHROPIC_API_KEY yet. Add it in Render's environment settings.";
   els.search.value = "";
   current = null;

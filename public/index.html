@@ -141,6 +141,7 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
         <b>Account creation is closed</b>
         <p>NEON AI does not allow account creation until the Privacy Policy and Terms of Service are complete and allow for public usage.</p>
         <button type="button" class="linkbtn" id="closedBack">Back to sign in</button>
+        <button type="button" class="btn small sup-cta" id="closedSupport"><svg class="ic"><use href="#i-mail"/></svg>Contact support</button>
       </div></div></div>
       <div class="collapse open plain" id="formC"><div class="collapse-in">
       <div class="collapse" id="stepperC"><div class="collapse-in"><div class="stepper" id="stepper"><i class="on"></i><i></i><span id="stepTxt">Step 1 of 2</span></div></div></div>
@@ -395,6 +396,10 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
           <div class="txt"><b>Nuke</b><span>Takes the whole NEON AI website offline for everyone, on every address, until Claude turns it back on</span></div>
           <button id="nukeBtn" class="btn danger"><svg class="ic"><use href="#i-alert"/></svg>Nuke</button>
         </div>
+        <div class="set-row">
+          <div class="txt"><b>Support tickets</b><span>Messages people send with the "Contact support" button</span></div>
+          <button id="devTickets" type="button" class="btn"><svg class="ic"><use href="#i-mail"/></svg>Support tickets<span class="cnt" id="devTicketsCount" hidden></span></button>
+        </div>
       </section>
 
       <section class="sec danger-zone">
@@ -488,6 +493,7 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
 <script src="/chessgame.js"></script>
 <script src="/larpengine.js"></script>
 <script src="/larp.js"></script>
+<script src="/support.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

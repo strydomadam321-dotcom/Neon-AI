@@ -94,7 +94,7 @@ If the content itself contains code fences, open and close the outer block with 
 // Update log shown to users once per new version (see changelog.json; newest entry first).
 const CHANGELOG = (() => { try { const j = JSON.parse(fs.readFileSync(path.join(__dirname, "changelog.json"), "utf8")); return Array.isArray(j) ? j : []; } catch { return []; } })();
 // Bump LEGAL_VERSION whenever the wording changes. CONTACT_EMAIL (environment) is where people can send privacy requests.
-const LEGAL_VERSION = "2026-11-22.1", LEGAL_UPDATED = "22 November 2026";
+const LEGAL_VERSION = "2026-11-22.2", LEGAL_UPDATED = "22 November 2026";
 const CONTACT_EMAIL = (process.env.CONTACT_EMAIL || "").trim();
 const readLegal = (n) => { try { return fs.readFileSync(path.join(__dirname, "legal", n + ".html"), "utf8"); } catch { return "<p>This document is not available right now.</p>"; } };
 const LEGAL = { terms: readLegal("terms"), privacy: readLegal("privacy") };
@@ -218,6 +218,21 @@ create table if not exists usage_window(
   gemini_tokens bigint not null default 0,
   claude_msgs int not null default 0
 );
+create table if not exists support_tickets(
+  id serial primary key,
+  name text,
+  email text not null,
+  category text not null,
+  subject text not null,
+  message text not null,
+  status text not null default 'open',
+  seen boolean not null default false,
+  user_id int references users(id) on delete set null,
+  ip_hash text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists support_tickets_status on support_tickets(status, created_at desc);
 create table if not exists meta(key text primary key, done_at timestamptz not null default now());
 `);
 // one-time reset requested by the owner: removes every account, chat and session, once
@@ -475,6 +490,44 @@ function checkSignupFields({ username, password, email }) {
 }
 
 // step 1 of email sign-up: nothing is created yet, we just email a code
+// ---------- support tickets: anyone can send one; dev accounts read them (Settings > Developer > Support tickets) ----------
+const TICKET_CATS = { account: "Sign-up & account", billing: "Billing & plans", bug: "Report a bug", other: "Something else" };
+app.post("/api/support", small, wrap(async (req, res) => {
+  const b = req.body || {};
+  if (b.website) return res.json({ ok: true, ref: "NEON-" + (1000 + crypto.randomInt(8999)) });                    // the hidden "trap" field was filled in: a bot, so pretend it worked
+  if (limited("support:" + req.ip, 5, 3600e3) || limited("support:all", 200, 3600e3)) return res.status(429).json({ error: "You've sent a lot of tickets. Please try again in a little while." });
+  const email = clip(b.email, 120).toLowerCase(), name = clip(b.name, 60), subject = clip(b.subject, 120), category = TICKET_CATS[b.category] ? b.category : "other";
+  const message = String(b.message ?? "").replace(/\r\n/g, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").trim().slice(0, 4000);
+  if (!EMAIL_RE.test(email)) return res.status(400).json({ error: "Enter a valid email so we can reply.", field: "email" });
+  if (subject.length < 3) return res.status(400).json({ error: "Add a short subject (at least 3 characters).", field: "subject" });
+  if (message.length < 10) return res.status(400).json({ error: "Tell us a bit more (at least 10 characters).", field: "message" });
+  let uid = null;                                                                                                   // if they happen to be signed in, link the ticket to their account
+  try { const t = getCookie(req, COOKIE); if (t) uid = (await q("select user_id from sessions where token_hash = $1 and expires_at > now()", [sha(t)])).rows[0]?.user_id || null; } catch {}
+  const { rows } = await q("insert into support_tickets(name,email,category,subject,message,user_id,ip_hash) values($1,$2,$3,$4,$5,$6,$7) returning id",
+    [name || null, email, category, subject, message, uid, sha("ip:" + req.ip).slice(0, 24)]);
+  console.log(`Support ticket NEON-${rows[0].id} (${category})`);
+  res.json({ ok: true, ref: "NEON-" + rows[0].id });
+}));
+const devOnly = (req, res) => { if (req.user.dev) return false; res.status(403).json({ error: "Not allowed." }); return true; };
+app.get("/api/dev/tickets", requireAuth, wrap(async (req, res) => {
+  if (devOnly(req, res)) return;
+  const rows = (await q(`select id, name, email, category, subject, message, status, seen, user_id, created_at from support_tickets order by (status = 'open') desc, created_at desc limit 300`)).rows;
+  const c = (await q("select count(*) filter (where status = 'open')::int as open, count(*) filter (where status <> 'open')::int as resolved, count(*) filter (where not seen)::int as unseen from support_tickets")).rows[0];
+  res.json({ tickets: rows.map((t) => ({ id: t.id, ref: "NEON-" + t.id, name: t.name, email: t.email, category: TICKET_CATS[t.category] || "Something else", subject: t.subject, message: t.message, status: t.status, seen: t.seen, account: !!t.user_id, at: new Date(t.created_at).getTime() })), counts: c });
+}));
+app.post("/api/dev/tickets/:id", requireAuth, small, wrap(async (req, res) => {
+  if (devOnly(req, res)) return;
+  const id = Number(req.params.id), act = req.body?.action;
+  if (!Number.isInteger(id) || !["seen", "resolve", "reopen"].includes(act)) return res.status(400).json({ error: "Bad request." });
+  const sql = act === "seen" ? "update support_tickets set seen = true where id = $1" : act === "resolve" ? "update support_tickets set status = 'resolved', seen = true, updated_at = now() where id = $1" : "update support_tickets set status = 'open', updated_at = now() where id = $1";
+  const r = await q(sql, [id]); if (!r.rowCount) return res.status(404).json({ error: "That ticket doesn't exist any more." });
+  res.json({ ok: true });
+}));
+app.delete("/api/dev/tickets/:id", requireAuth, wrap(async (req, res) => {
+  if (devOnly(req, res)) return;
+  await q("delete from support_tickets where id = $1", [Number(req.params.id) || 0]); res.json({ ok: true });
+}));
+
 // ---------- sign-ups are closed ----------
 // Creating accounts is switched off until the Privacy Policy and Terms of Service are complete and allow for public use.
 // Signing in to an existing account is not affected. Set SIGNUPS_OPEN=1 in the environment to switch sign-ups on again.
@@ -742,6 +795,7 @@ async function mePayload(u) {
   return {
     user: { username: u.username, hasPassword: u.has_password !== false, picture: u.avatar || null, dev }, settings: u.settings,
     plan: { id: plan, requested: u.plan_requested && u.plan_requested !== plan ? u.plan_requested : null, owner: OWNERS.has(u.username.toLowerCase()), chosen: dev || !!extra.plan_chosen, usedTokens: use.gemini, usedClaude: use.claude, resetAt: use.resetAt },
+    ...(dev ? { tickets: ((await q("select count(*) filter (where status = 'open')::int as open, count(*) filter (where not seen)::int as unseen from support_tickets")).rows[0]) } : {}),
     billing: { enabled: !!STRIPE_KEY && (STRIPE_LIVE || dev), test: !STRIPE_LIVE, customer: !!extra.stripe_customer, status: extra.stripe_status || null, renews: extra.plan_renews ? new Date(extra.plan_renews).getTime() : null, cancelling: !!extra.plan_cancelling },
   };
 }
