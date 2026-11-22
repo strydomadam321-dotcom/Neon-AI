@@ -137,6 +137,12 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
     </div></div></div>
 
     <form id="authForm" novalidate autocomplete="on">
+      <div class="collapse" id="closedC"><div class="collapse-in"><div class="closed-note" role="status">
+        <b>Account creation is closed</b>
+        <p>NEON AI does not allow account creation until the Privacy Policy and Terms of Service are complete and allow for public usage.</p>
+        <button type="button" class="linkbtn" id="closedBack">Back to sign in</button>
+      </div></div></div>
+      <div class="collapse open plain" id="formC"><div class="collapse-in">
       <div class="collapse" id="stepperC"><div class="collapse-in"><div class="stepper" id="stepper"><i class="on"></i><i></i><span id="stepTxt">Step 1 of 2</span></div></div></div>
       <div id="steps" class="steps">
       <div id="step1" class="step">
@@ -176,20 +182,6 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
           <span class="box"><svg class="ic"><use href="#i-check"/></svg></span>
           <span class="check-txt">I'm 16 or older and I agree to the <a href="/terms" data-legal="terms">Terms of Service</a> and <a href="/privacy" data-legal="privacy">Privacy Policy</a>. My email is only used to verify my account.</span>
         </label>
-      </div>
-
-      <div id="step6" class="step" hidden>
-        <button type="button" class="back" id="backBtn6"><svg class="ic"><use href="#i-back"/></svg>Back</button>
-        <h4 class="s2-title">The Riddle Gate</h4>
-        <p class="s2-sub">Sign-ups are closed for now. The only way in: answer <b>300 riddles</b> in a row. <b>Refresh the page and you start again from 1.</b></p>
-        <div class="rg-prog"><div class="rg-bar"><i id="rgBar"></i></div><span id="rgCount">0 / 300</span></div>
-        <div class="rg-card"><span class="rg-kind" id="rgKind">...</span><p class="rg-text" id="rgText">Waking the gatekeeper...</p></div>
-        <label class="field" id="fRiddle">
-          <svg class="ic"><use href="#i-bolt"/></svg>
-          <input id="riddleAns" type="text" placeholder="Your answer" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="60">
-        </label>
-        <p class="rg-msg" id="rgMsg" aria-live="polite"></p>
-        <button type="button" class="linkbtn rg-hard" id="rgHard">This is too hard</button>
       </div>
 
       <div id="step3" class="step" hidden>
@@ -239,6 +231,7 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
 
       <div id="authErr" class="auth-err" role="alert"></div>
       <button class="btn primary big" id="authSubmit" type="submit"><span class="lbl">Sign in</span><span class="spin"></span></button>
+      </div></div>
       <div class="collapse open" id="gLoginC"><div class="collapse-in"><div class="g-wrap">
         <div class="divider"><span>or</span></div>
         <button type="button" class="gbar" id="googleBtn2"><svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg><span>Continue with Google</span></button>
@@ -442,16 +435,6 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
       <label class="check"><input type="checkbox" id="wnNever"><span class="box"><svg class="ic"><use href="#i-check"/></svg></span><span class="check-txt">Don't show again</span></label>
       <button type="button" class="btn primary" id="wnOk"><span class="lbl">Got it</span></button>
     </div>
-  </div>
-</div>
-<div id="paintDry" class="overlay hidden">
-  <div class="card pd-card" role="dialog" aria-modal="true" aria-labelledby="pdTitle">
-    <h3 id="pdTitle">Watch paint dry.</h3>
-    <p class="pd-sub">Ten hours of paint drying, start to finish. No pausing, no rewinding, no skipping ahead. <b>Refresh the page or leave and it starts over.</b> When it's done, the gate opens. Every few seconds a glowing circle appears: <b>catch it</b> to jump ahead 1 to 10 minutes. It runs away from your cursor.</p>
-    <div class="pd-video"><div id="pdPlayer"></div><div class="pd-shield" id="pdShield"></div></div>
-    <div class="rg-prog"><div class="rg-bar"><i id="pdBar"></i></div><span id="pdTime">0:00:00 / 10:00:00</span></div>
-    <p class="rg-msg" id="pdMsg" aria-live="polite"></p>
-    <div class="pd-foot"><button type="button" class="btn small" id="pdSound">Mute</button><button type="button" class="btn small" id="pdQuit">I give up</button></div>
   </div>
 </div>
 <div id="legal" class="overlay hidden">

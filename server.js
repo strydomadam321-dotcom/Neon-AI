@@ -6,7 +6,6 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { TOTAL as RIDDLES, riddleAt, isRight, publicRiddle } from "./riddles.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -95,7 +94,7 @@ If the content itself contains code fences, open and close the outer block with 
 // Update log shown to users once per new version (see changelog.json; newest entry first).
 const CHANGELOG = (() => { try { const j = JSON.parse(fs.readFileSync(path.join(__dirname, "changelog.json"), "utf8")); return Array.isArray(j) ? j : []; } catch { return []; } })();
 // Bump LEGAL_VERSION whenever the wording changes. CONTACT_EMAIL (environment) is where people can send privacy requests.
-const LEGAL_VERSION = "2026-11-21.3", LEGAL_UPDATED = "21 November 2026";
+const LEGAL_VERSION = "2026-11-22.1", LEGAL_UPDATED = "22 November 2026";
 const CONTACT_EMAIL = (process.env.CONTACT_EMAIL || "").trim();
 const readLegal = (n) => { try { return fs.readFileSync(path.join(__dirname, "legal", n + ".html"), "utf8"); } catch { return "<p>This document is not available right now.</p>"; } };
 const LEGAL = { terms: readLegal("terms"), privacy: readLegal("privacy") };
@@ -430,7 +429,7 @@ const big = express.json({ limit: "45mb" });
 
 // ---------- auth ----------
 app.get("/api/config", (req, res) => {
-  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: !!STRIPE_KEY && STRIPE_LIVE, hasKey: !!process.env.ANTHROPIC_API_KEY, signupGate: !SIGNUPS_OPEN, hasGemini: !!GEMINI_KEY, hasGoogle: !!(GOOGLE_ID && GOOGLE_SECRET), mailReady: MAIL_READY, legalVersion: LEGAL_VERSION, version: CHANGELOG[0]?.version || "1", changelog: CHANGELOG.slice(0, 6), defaultEffort: DEFAULT_EFFORT });
+  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: !!STRIPE_KEY && STRIPE_LIVE, hasKey: !!process.env.ANTHROPIC_API_KEY, signupsOpen: SIGNUPS_OPEN, hasGemini: !!GEMINI_KEY, hasGoogle: !!(GOOGLE_ID && GOOGLE_SECRET), mailReady: MAIL_READY, legalVersion: LEGAL_VERSION, version: CHANGELOG[0]?.version || "1", changelog: CHANGELOG.slice(0, 6), defaultEffort: DEFAULT_EFFORT });
 });
 
 const USER_RE = /^[A-Za-z0-9_.-]{3,24}$/;
@@ -476,86 +475,14 @@ function checkSignupFields({ username, password, email }) {
 }
 
 // step 1 of email sign-up: nothing is created yet, we just email a code
-// ---------- the Riddle Gate: sign-ups are closed for now, behind 300 riddles ----------
-// Set SIGNUPS_OPEN=1 in the environment to open sign-ups normally again. Riddles and answers stay on the server; the page only
-// ever sees one riddle at a time, and its progress lives in the page's memory (a refresh starts again from 1).
+// ---------- sign-ups are closed ----------
+// Creating accounts is switched off until the Privacy Policy and Terms of Service are complete and allow for public use.
+// Signing in to an existing account is not affected. Set SIGNUPS_OPEN=1 in the environment to switch sign-ups on again.
 const SIGNUPS_OPEN = process.env.SIGNUPS_OPEN === "1";
-const gates = new Map(), passes = new Map();
-const skips = new Map();
-const SKIP_MS = Number(process.env.SKIP_WATCH_MS) || 10 * 3600e3;
-const ORB_GAP_MS = Number(process.env.ORB_GAP_MS) || 4500, ORB_LIFE_MS = Number(process.env.ORB_LIFE_MS) || 12000;   // bonus circles: at most one every ~5 s, claimable for a few seconds           // the "this is too hard" way in: watching paint dry for 10 hours
-setInterval(() => { const now = Date.now(); for (const [k, g] of gates) if (now - g.at > 2 * 3600e3) gates.delete(k); for (const [k, v] of passes) if (v.exp < now) passes.delete(k); for (const [k, v] of skips) if (now - v.start > SKIP_MS + 8 * 3600e3) skips.delete(k); }, 5 * 60e3).unref();
-const gateOk = (req) => { const t = String(req.body?.pass || ""); const v = passes.get(t); return !!(v && v.exp > Date.now() && v.uses < 5 && (v.uses++, true)); };
-const needGate = (req, res) => {
-  if (SIGNUPS_OPEN || gateOk(req)) return false;
-  res.status(403).json({ error: "Sign-ups are locked behind the Riddle Gate. Solve all 300 riddles to get in.", field: "riddle" });
-  return true;
-};
-app.post("/api/riddle/start", small, wrap(async (req, res) => {
-  if (SIGNUPS_OPEN) return res.json({ open: true });
-  if (limited("rstart:" + req.ip, 30, 3600e3)) return res.status(429).json({ error: "Easy there. Too many attempts, try again later." });
-  if (gates.size > 20000) return res.status(503).json({ error: "The gate is busy. Try again in a bit." });
-  const id = crypto.randomBytes(16).toString("hex"), g = { seed: crypto.randomInt(1, 2 ** 31), i: 0, salt: 0, wrong: 0, at: Date.now(), last: 0, ip: req.ip };
-  gates.set(id, g);
-  res.json({ gate: id, i: 0, total: RIDDLES, q: publicRiddle(riddleAt(g.seed, 0, 0)) });
-}));
-app.post("/api/riddle/answer", small, wrap(async (req, res) => {
-  const g = gates.get(String(req.body?.gate || ""));
-  if (!g) return res.status(404).json({ error: "This run has ended. Start again from riddle 1.", gone: true });
-  if (limited("rans:" + req.ip, 400, 10 * 60e3)) return res.status(429).json({ error: "Slow down. You can't answer that quickly." });
-  const now = Date.now(); if (now - g.last < 250) return res.status(429).json({ error: "Slow down. You can't answer that quickly." });
-  g.last = now; g.at = now;
-  const q = riddleAt(g.seed, g.i, g.salt);
-  if (!isRight(q, req.body?.answer)) {
-    g.wrong++;
-    if (g.wrong >= 6) { g.wrong = 0; g.salt++; return res.json({ ok: false, changed: true, q: publicRiddle(riddleAt(g.seed, g.i, g.salt)), i: g.i }); }   // too many guesses: a new riddle takes its place
-    return res.json({ ok: false, i: g.i, left: 6 - g.wrong });
-  }
-  g.i++; g.wrong = 0; g.salt = 0;
-  if (g.i >= RIDDLES) {
-    const pass = crypto.randomBytes(24).toString("hex"); passes.set(pass, { exp: now + 20 * 60e3, uses: 0 }); gates.delete(String(req.body.gate));
-    console.log("Riddle Gate: someone solved all", RIDDLES, "riddles");
-    return res.json({ ok: true, done: true, pass, i: g.i });
-  }
-  res.json({ ok: true, i: g.i, q: publicRiddle(riddleAt(g.seed, g.i, 0)) });
-}));
-
-// "This is too hard": watch paint dry for 10 hours. The page plays the video without controls; the server is what makes it count:
-// the ticket only turns into a pass once (about) 10 real hours have gone by since it was handed out.
-app.post("/api/riddle/skip/start", small, wrap(async (req, res) => {
-  if (SIGNUPS_OPEN) return res.json({ open: true });
-  if (limited("skipstart:" + req.ip, 10, 3600e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
-  if (skips.size > 5000) return res.status(503).json({ error: "The paint is busy drying. Try again in a bit." });
-  const ticket = crypto.randomBytes(16).toString("hex"); skips.set(ticket, { start: Date.now(), credit: 0, lastOrb: 0, orbs: new Map() });
-  res.json({ ticket, ms: SKIP_MS });
-}));
-// a bonus circle: the server decides when one appears and how many minutes it is worth (1 to 10); catching it (a claim) credits that time
-app.post("/api/riddle/skip/orb", small, wrap(async (req, res) => {
-  const t = skips.get(String(req.body?.ticket || "")); if (!t) return res.status(404).json({ error: "This run has ended.", gone: true });
-  const now = Date.now(); if (now - t.lastOrb < ORB_GAP_MS) return res.status(429).json({ error: "Too soon.", wait: ORB_GAP_MS - (now - t.lastOrb) });
-  t.lastOrb = now; for (const [k, o] of t.orbs) if (now - o.at > ORB_LIFE_MS * 2) t.orbs.delete(k);
-  const orb = crypto.randomBytes(8).toString("hex"), minutes = crypto.randomInt(1, 11); t.orbs.set(orb, { at: now, minutes });
-  res.json({ orb, minutes });
-}));
-app.post("/api/riddle/skip/claim", small, wrap(async (req, res) => {
-  const t = skips.get(String(req.body?.ticket || "")); if (!t) return res.status(404).json({ error: "This run has ended.", gone: true });
-  const id = String(req.body?.orb || ""), o = t.orbs.get(id); t.orbs.delete(id);
-  if (!o || Date.now() - o.at > ORB_LIFE_MS) return res.status(404).json({ error: "Too slow. It got away." });
-  t.credit += o.minutes * 60e3;
-  res.json({ ok: true, minutes: o.minutes });
-}));
-app.post("/api/riddle/skip/finish", small, wrap(async (req, res) => {
-  const ticket = String(req.body?.ticket || ""), t = skips.get(ticket);
-  if (!t) return res.status(404).json({ error: "This run has ended. Start again.", gone: true });
-  const left = t.start + SKIP_MS - t.credit - Math.min(60e3, SKIP_MS / 20) - Date.now();      // real time watched + minutes won from the bonus circles
-  if (left > 0) return res.status(425).json({ error: "The paint isn't dry yet.", left: Math.ceil(left / 1000) });
-  skips.delete(ticket);
-  const pass = crypto.randomBytes(24).toString("hex"); passes.set(pass, { exp: Date.now() + 20 * 60e3, uses: 0 });
-  console.log("Riddle Gate: someone watched the paint dry");
-  res.json({ ok: true, done: true, pass });
-}));
+const SIGNUPS_CLOSED_MSG = "NEON AI does not allow account creation until the Privacy Policy and Terms of Service are complete and allow for public usage.";
+const signupsClosed = (res) => { if (SIGNUPS_OPEN) return false; res.status(403).json({ error: SIGNUPS_CLOSED_MSG, field: "closed" }); return true; };
 app.post("/api/signup/start", small, wrap(async (req, res) => {
-  if (needGate(req, res)) return;
+  if (signupsClosed(res)) return;
   if (limited("sstart:" + req.ip, 10, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
   const bad = checkSignupFields(req.body || {});
   if (bad) return res.status(400).json(bad);
@@ -639,7 +566,7 @@ app.post("/api/auth/google/start", small, wrap(async (req, res) => {
   const { username, password, remember } = req.body || {};
   let name = null, hash = null;
   if (username !== undefined || password !== undefined) {   // creating an account: they picked a username and password first
-    if (needGate(req, res)) return;
+    if (signupsClosed(res)) return;
     const bad = checkSignupFields({ username, password, email: "x@x.xx" });
     if (bad) return res.status(400).json(bad);
     if (req.body?.agree !== true) return res.status(400).json({ error: "Please agree to the Terms and Privacy Policy to continue.", field: "agree" });
