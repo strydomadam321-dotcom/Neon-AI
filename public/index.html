@@ -141,10 +141,12 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
       <div id="closedC" hidden><div class="closed-note" role="status">
         <b>Account creation is closed</b>
         <p>NEON AI does not allow account creation until the Privacy Policy and Terms of Service are complete and allow for public usage.</p>
+        <p class="closed-hint">Already approved? Open the sign-up link in the email we sent you.</p>
         <button type="button" class="linkbtn" id="closedBack">Back to sign in</button>
         <button type="button" class="btn small sup-cta" id="closedSupport"><svg class="ic"><use href="#i-mail"/></svg>Contact support</button>
       </div></div>
       <div id="formC">
+      <div class="approved-note" id="approvedNote" hidden><svg class="ic"><use href="#i-check"/></svg><span>You're approved to create an account with <b id="approvedEmail"></b>.</span></div>
       <div class="collapse" id="stepperC"><div class="collapse-in"><div class="stepper" id="stepper"><i class="on"></i><i></i><span id="stepTxt">Step 1 of 2</span></div></div></div>
       <div id="steps" class="steps">
       <div id="step1" class="step">

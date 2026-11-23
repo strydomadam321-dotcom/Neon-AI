@@ -242,12 +242,12 @@ async function googleGo() {
   googleBusy(true);
   try {
     const body = { remember: $("remember").checked };
-    if (mode === "signup") { body.username = authEls.user.value.trim(); body.password = authEls.pass.value; body.agree = true; }   // the username they chose is kept
+    if (mode === "signup") { body.username = authEls.user.value.trim(); body.password = authEls.pass.value; body.agree = true; if (approval.ok) body.approval = approval.token; }   // the username they chose is kept
     const d = await api("/api/auth/google/start", { method: "POST", noAuthRedirect: true, body });
     location.href = d.url;
   } catch (err) {
     googleBusy(false);
-    if (err.field === "closed") { config.signupsOpen = false; setMode("signup"); return; }
+    if (err.field === "closed") { config.signupsOpen = false; dropApproval(); setMode("signup"); return; }
     if (err.field === "username" || err.field === "password") { goStep(1); setTimeout(() => fieldErr(err.field === "username" ? "fUser" : "fPass", err.message), 300); }
     else toast(err.message || "Couldn't open Google. Please try again.", "err");
   }
@@ -263,6 +263,7 @@ const authEls = { form: $("authForm"), user: $("username"), pass: $("password"),
 
 // "Create account" while sign-ups are closed: the form and the notice swap places with the same springy height morph as the sign-up steps
 let closedShown = false, swapT = 0;
+const approval = { token: "", email: "", ok: false };      // set when the page is opened from an approval email (?signup=...)
 function showClosedNote(on, instant) {
   if (on === closedShown) return;
   const wrap = $("authBody"), form = $("formC"), note = $("closedC");
@@ -277,6 +278,16 @@ function showClosedNote(on, instant) {
     an.onfinish = an.oncancel = () => { wrap.style.height = ""; wrap.classList.remove("morphing"); to.classList.remove("swap-in"); };
   }, 220);
 }
+// an approval email's link: the page opens the normal sign-up with the approved email locked in
+function dropApproval() { approval.ok = false; approval.token = ""; $("email").readOnly = false; }
+async function checkApproval(token) {
+  try {
+    const d = await api("/api/signup/approval", { method: "POST", noAuthRedirect: true, body: { token } });
+    Object.assign(approval, { token, email: d.email, ok: true });
+    $("approvedEmail").textContent = d.email; $("email").value = d.email; $("email").readOnly = true;
+    setMode("signup"); toast("You're approved! Create your account below.", "ok");
+  } catch (e) { toast(e.message || "That approval link isn't valid.", "err"); }
+}
 function setMode(m, instant) {
   mode = m;
   document.querySelector(".tabs").dataset.mode = m;
@@ -286,8 +297,9 @@ function setMode(m, instant) {
   $("forgotC").classList.remove("open");
   $("strengthC").classList.toggle("open", m === "signup");
   $("stepperC").classList.toggle("open", m === "signup");
-  const closed = m === "signup" && config.signupsOpen !== true;        // sign-ups are switched off for now: show the notice instead of the form
+  const closed = m === "signup" && config.signupsOpen !== true && !approval.ok;        // sign-ups are switched off for now: show the notice instead of the form
   showClosedNote(closed, instant);
+  $("approvedNote").hidden = !(approval.ok && m === "signup");
   if (step !== 1) goStep(1, instant); else syncStep(!instant);
   authEls.err.textContent = "";
   document.querySelectorAll(".field.bad").forEach((f) => f.classList.remove("bad"));
@@ -376,7 +388,7 @@ authEls.form.onsubmit = async (e) => {
     if (mode === "login") data = await api("/api/login", { method: "POST", noAuthRedirect: true, body: { username, password, remember: $("remember").checked } });
     else if (step === 2) {
       // email route: send the code, then slide to the code screen
-      const d = await api("/api/signup/start", { method: "POST", noAuthRedirect: true, body: { username, password, email, agree: true } });
+      const d = await api("/api/signup/start", { method: "POST", noAuthRedirect: true, body: { username, password, email, agree: true, ...(approval.ok ? { approval: approval.token } : {}) } });
       signupEmail = email.toLowerCase(); $("codeSub").textContent = `We sent a 6-digit code to ${d.email}. It's valid for 10 minutes.`;
       otpS.clear(); startResendCooldown(d.cooldown || 30); goStep(3);
       return;
@@ -386,7 +398,7 @@ authEls.form.onsubmit = async (e) => {
     if (mode === "signup") toast("Account created. Welcome aboard.");
   } catch (err) {
     const map = { email: "fEmail", username: "fUser", password: "fPass" };
-    if (err.field === "closed") { config.signupsOpen = false; setMode("signup"); }
+    if (err.field === "closed") { config.signupsOpen = false; dropApproval(); setMode("signup"); }
     else if (err.field === "code") { otpS.clear(); otpS.shake(); authEls.err.textContent = err.message; if (!err.expired) otpS.boxes[0].focus(); }
     else if (map[err.field]) {
       if (mode === "signup" && step >= 2 && err.field !== "email") { goStep(1); setTimeout(() => fieldErr(map[err.field], err.message), 300); }
@@ -1803,8 +1815,8 @@ async function enterApp(data) {
 }
 
 (async function init() {
-  const qs = new URLSearchParams(location.search), authErr = qs.get("auth_error"), welcome = qs.has("welcome"), billing = qs.get("billing");
-  if (authErr || welcome || billing) history.replaceState(null, "", location.pathname);
+  const qs = new URLSearchParams(location.search), authErr = qs.get("auth_error"), welcome = qs.has("welcome"), billing = qs.get("billing"), signupTok = qs.get("signup");
+  if (authErr || welcome || billing || signupTok) history.replaceState(null, "", location.pathname);
   try { config = await (await fetch("/api/config")).json(); } catch {}
   try {
     const data = await api("/api/me", { noAuthRedirect: true });
@@ -1815,5 +1827,6 @@ async function enterApp(data) {
   } catch {
     showAuth(authErr || "");
     if (authErr) toast(authErr, "err");
+    if (signupTok) checkApproval(signupTok);
   }
 })();

@@ -99,7 +99,9 @@
   function close() { if (!box) return; box.classList.add("out"); setTimeout(() => { box.classList.add("hidden"); box.classList.remove("out"); }, 240); }
 
   // ---------- the inbox for dev accounts ----------
-  let inb = null, data = { tickets: [], counts: { open: 0, resolved: 0, unseen: 0 } }, tab = "open", sel = 0, timer = 0;
+  let inb = null, data = { tickets: [], counts: { open: 0, resolved: 0, unseen: 0 }, mail: true }, tab = "open", sel = 0, timer = 0;
+  let follow = 0;                                                  // after approving or declining, the panel follows that ticket to the tab it moved to
+  const drafts = new Map(), composing = new Set();             // an unsent reply survives the 30 s refresh and switching tickets
   function buildInbox() {
     if (inb) return inb;
     inb = document.createElement("div"); inb.id = "inbox"; inb.className = "overlay hidden";
@@ -127,12 +129,47 @@
       <div class="inb-dh"><span class="sup-ref">${esc(cur.ref)}</span><span class="chip ${cur.status === "open" ? "open" : "done"}">${cur.status === "open" ? "Open" : "Resolved"}</span><span class="chip">${esc(cur.category)}</span>${cur.account ? '<span class="chip">Signed in</span>' : ""}</div>
       <h4>${esc(cur.subject)}</h4><p class="inb-from">${esc(cur.name || "No name")} &lt;<a href="mailto:${esc(cur.email)}">${esc(cur.email)}</a>&gt; · ${esc(new Date(cur.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }))}</p>
       <div class="inb-msg">${esc(cur.message)}</div>
-      <div class="inb-btns"><a class="btn primary small" href="mailto:${esc(cur.email)}?subject=${encodeURIComponent("Re: [" + cur.ref + "] " + cur.subject)}&body=${encodeURIComponent("\n\n---\nYou wrote:\n" + cur.message.slice(0, 600))}">${H.icon("mail")}<span>Reply by email</span></a>
+      ${data.mail ? "" : `<p class="inb-warn">Email isn't set up on the server yet (RESEND_API_KEY), so replies and approvals can't be sent.</p>`}
+      ${(cur.thread || []).length ? `<div class="inb-thread">${cur.thread.map((m) => `<div class="inb-sent ${esc(m.kind)}"><b>${m.kind === "reply" ? "You replied" : m.kind === "approved" ? "Approved" : "Declined"} · ${esc(new Date(m.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }))}${m.by ? " · " + esc(m.by) : ""}</b><p>${esc(m.body)}</p></div>`).join("")}</div>` : ""}
+      ${acctRow(cur)}
+      <div class="inb-compose" id="inbCompose"${composing.has(cur.id) ? "" : " hidden"}><textarea id="inbDraft" maxlength="4000" placeholder="Write your reply. NEON AI emails it to ${esc(cur.email)}.">${esc(drafts.get(cur.id) || "")}</textarea>
+        <div class="row"><small>Sent from the NEON AI address, with the ticket number in the subject.</small><span><button type="button" class="btn small" id="inbCancel">Cancel</button> <button type="button" class="btn primary small" id="inbSend">${H.icon("mail")}<span>Send reply</span></button></span></div></div>
+      <div class="inb-btns"><button type="button" class="btn primary small" id="inbReply">${H.icon("mail")}<span>Reply</span></button>
         <button type="button" class="btn small" id="inbToggle">${cur.status === "open" ? "Mark resolved" : "Reopen"}</button><button type="button" class="btn small danger" id="inbDel">${H.icon("trash")}<span>Delete</span></button></div>`
       : `<div class="inb-none">Select a ticket to read it</div>`;
     const bk = $("#inbBack"); if (bk) bk.onclick = () => $("#inbBody").classList.remove("show-detail");
     if (cur && !cur.seen) markSeen(cur.id);                          // a ticket you are looking at counts as seen
-    if (cur) { $("#inbToggle").onclick = () => act(cur, cur.status === "open" ? "resolve" : "reopen"); $("#inbDel").onclick = () => remove(cur); }
+    if (cur) {
+      $("#inbToggle").onclick = () => act(cur, cur.status === "open" ? "resolve" : "reopen"); $("#inbDel").onclick = () => remove(cur);
+      const comp = $("#inbCompose"), draft = $("#inbDraft");
+      $("#inbReply").onclick = () => { composing.add(cur.id); comp.hidden = false; draft.focus(); };
+      $("#inbCancel").onclick = () => { composing.delete(cur.id); comp.hidden = true; };
+      draft.oninput = () => drafts.set(cur.id, draft.value);
+      $("#inbSend").onclick = () => sendReply(cur, draft.value, $("#inbSend"));
+      const ap = $("#inbApprove"), dc = $("#inbDecline"); if (ap) ap.onclick = () => approve(cur, ap); if (dc) dc.onclick = () => decline(cur, dc);
+    }
+  }
+  // the "account" line of a ticket: is the email already registered, and has it been approved or declined?
+  function acctRow(t) {
+    if (t.registered) return `<div class="inb-acct"><span class="st"><b>This email already has an account.</b> Nothing to approve.</span></div>`;
+    const a = t.approval, when = a ? new Date(a.at).toLocaleDateString([], { day: "numeric", month: "short" }) : "";
+    const st = !a ? "This email has <b>no account</b> yet and sign-ups are closed." : a.status === "approved" ? `<b>Approved</b> on ${esc(when)}. A sign-up link was emailed; it works once.` : a.status === "expired" ? `<b>Approved</b> on ${esc(when)}, but the link has <b>expired</b>.` : a.status === "declined" ? `<b>Declined</b> on ${esc(when)}.` : `Account <b>created</b> from the approval.`;
+    if (a && a.status === "used") return `<div class="inb-acct"><span class="st">${st}</span></div>`;
+    return `<div class="inb-acct"><span class="st">${st}</span><button type="button" class="btn good small" id="inbApprove">${H.icon("check")}<span>${a && (a.status === "approved" || a.status === "expired") ? "Send a new link" : "Approve account"}</span></button>${a && a.status === "declined" ? "" : `<button type="button" class="btn danger small" id="inbDecline">${H.icon("x")}<span>Decline</span></button>`}</div>`;
+  }
+  async function busy(btn, fn) { const html = btn.innerHTML; btn.disabled = true; btn.innerHTML = "<span>Sending...</span>"; try { return await fn(); } finally { btn.disabled = false; btn.innerHTML = html; } }
+  async function sendReply(t, text, btn) {
+    text = text.trim(); if (text.length < 2) { H.toast("Write a message first.", "err"); return; }
+    try { await busy(btn, () => H.api(`/api/dev/tickets/${t.id}/reply`, { method: "POST", body: { message: text } })); drafts.delete(t.id); composing.delete(t.id); H.toast("Reply emailed to " + t.email + "."); await load(true); } catch (e) { H.toast(e.message, "err"); }
+  }
+  async function approve(t, btn) {
+    if (!(await H.dialog({ title: "Approve this account?", message: `${t.email} will get an email from NEON AI with a one-time link to create an account, even though sign-ups are closed. The ticket will be marked resolved.`, ok: "Approve and email" }))) return;
+    try { await busy(btn, () => H.api(`/api/dev/tickets/${t.id}/approve`, { method: "POST", body: {} })); H.toast("Approved. The sign-up link was emailed to " + t.email + "."); follow = t.id; await load(true); } catch (e) { H.toast(e.message, "err"); }
+  }
+  async function decline(t, btn) {
+    const reason = await H.dialog({ title: "Decline this account?", message: `${t.email} will get an email saying we can't create an account right now. You can add a reason (they will see it), or leave it empty.`, input: "", placeholder: "Optional reason", ok: "Decline and email", danger: true });
+    if (reason === null || reason === false) return;
+    try { await busy(btn, () => H.api(`/api/dev/tickets/${t.id}/decline`, { method: "POST", body: { reason: String(reason).trim() } })); H.toast("Declined. They were emailed."); follow = t.id; await load(true); } catch (e) { H.toast(e.message, "err"); }
   }
   async function act(t, action) {
     try { await H.api("/api/dev/tickets/" + t.id, { method: "POST", body: { action } }); await load(); } catch (e) { H.toast(e.message, "err"); }
@@ -143,7 +180,7 @@
     try { await H.api("/api/dev/tickets/" + t.id, { method: "DELETE" }); sel = 0; await load(); H.toast("Ticket deleted."); } catch (e) { H.toast(e.message, "err"); }
   }
   async function load(manual) {
-    try { data = await H.api("/api/dev/tickets"); if (!shown().some((t) => t.id === sel)) sel = 0; H.onCount && H.onCount(data.counts); if (inb && !inb.classList.contains("hidden")) paint(!manual && !inb.dataset.painted); inb && (inb.dataset.painted = "1"); }
+    try { data = await H.api("/api/dev/tickets"); if (follow) { const ft = data.tickets.find((x) => x.id === follow); follow = 0; if (ft) { sel = ft.id; if (!shown().some((t) => t.id === ft.id)) tab = ft.status === "open" ? "open" : "resolved"; } } if (!shown().some((t) => t.id === sel)) sel = 0; H.onCount && H.onCount(data.counts); if (inb && !inb.classList.contains("hidden")) paint(!manual && !inb.dataset.painted); inb && (inb.dataset.painted = "1"); }
     catch (e) { H.toast(e.message, "err"); }
   }
   function openInbox() {

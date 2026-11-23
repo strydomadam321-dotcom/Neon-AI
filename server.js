@@ -94,7 +94,7 @@ If the content itself contains code fences, open and close the outer block with 
 // Update log shown to users once per new version (see changelog.json; newest entry first).
 const CHANGELOG = (() => { try { const j = JSON.parse(fs.readFileSync(path.join(__dirname, "changelog.json"), "utf8")); return Array.isArray(j) ? j : []; } catch { return []; } })();
 // Bump LEGAL_VERSION whenever the wording changes. CONTACT_EMAIL (environment) is where people can send privacy requests.
-const LEGAL_VERSION = "2026-11-22.2", LEGAL_UPDATED = "22 November 2026";
+const LEGAL_VERSION = "2026-11-23.1", LEGAL_UPDATED = "23 November 2026";
 const CONTACT_EMAIL = (process.env.CONTACT_EMAIL || "").trim();
 const readLegal = (n) => { try { return fs.readFileSync(path.join(__dirname, "legal", n + ".html"), "utf8"); } catch { return "<p>This document is not available right now.</p>"; } };
 const LEGAL = { terms: readLegal("terms"), privacy: readLegal("privacy") };
@@ -233,6 +233,27 @@ create table if not exists support_tickets(
   updated_at timestamptz not null default now()
 );
 create index if not exists support_tickets_status on support_tickets(status, created_at desc);
+create table if not exists signup_approvals(
+  email_norm text primary key,
+  email text not null,
+  token_hash text,
+  status text not null default 'approved',
+  ticket_id int,
+  decided_by text,
+  note text,
+  expires_at timestamptz,
+  decided_at timestamptz not null default now(),
+  used_at timestamptz
+);
+create table if not exists ticket_replies(
+  id serial primary key,
+  ticket_id int not null references support_tickets(id) on delete cascade,
+  kind text not null,
+  body text not null,
+  by_user text,
+  sent_at timestamptz not null default now()
+);
+alter table google_pending add column if not exists approval_hash text;
 create table if not exists meta(key text primary key, done_at timestamptz not null default now());
 `);
 // one-time reset requested by the owner: removes every account, chat and session, once
@@ -454,6 +475,24 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const codeHash = (em, code) => sha(`${em}:${code}:${process.env.CODE_PEPPER || "neon"}`);
 const maskEmail = (em) => { const [l, d] = em.split("@"); return (l.length <= 2 ? l[0] + "*" : l[0] + "*".repeat(Math.min(5, l.length - 2)) + l.slice(-1)) + "@" + d; };
 
+// Any email from the bot (replies to tickets, approvals, declines). Same sender as the verification codes.
+async function sendMail({ to, subject, html, text, replyTo }) {
+  if (!RESEND_KEY) { console.log(`[mail debug] to ${to}: ${subject}\n${text}`); return; }
+  const r = await fetch(RESEND_URL, {
+    method: "POST", signal: AbortSignal.timeout(15000),
+    headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: MAIL_FROM, to: [to], subject, html, text, ...(replyTo ? { reply_to: replyTo } : {}) }),
+  });
+  if (!r.ok) { const t = await r.text().catch(() => ""); throw new Error(`Resend ${r.status}: ${t.slice(0, 200)}`); }
+}
+const escHtml = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "&quot;": "&quot;" }[c] || "&quot;"));
+const mailCard = (title, bodyHtml, button, foot) => `<div style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:480px;margin:0 auto;padding:28px;color:#111">
+  <div style="font-weight:800;letter-spacing:.3em;font-size:13px;color:#b03bd6;margin-bottom:14px">NEON AI</div>
+  <h2 style="margin:0 0 10px;font-size:21px">${title}</h2>
+  <div style="font-size:15px;line-height:1.6;color:#333">${bodyHtml}</div>
+  ${button ? `<p style="margin:22px 0 6px"><a href="${button.url}" style="display:inline-block;background:linear-gradient(120deg,#ff5fd8,#8b5cf6);color:#fff;text-decoration:none;font-weight:700;padding:12px 24px;border-radius:12px">${escHtml(button.label)}</a></p><p style="margin:6px 0 0;font-size:12px;color:#888;word-break:break-all">Or paste this link into your browser: ${button.url}</p>` : ""}
+  <p style="margin:24px 0 0;color:#888;font-size:12.5px;line-height:1.5">${foot}</p></div>`;
+const paras = (s) => escHtml(s).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px">${p.replace(/\n/g, "<br>")}</p>`).join("");
 async function sendCodeEmail(to, code, kind = "signup") {
   const reset = kind === "reset";
   if (!RESEND_KEY) { console.log(`[mail debug] ${kind} code for ${to}: ${code}`); return; }
@@ -517,7 +556,75 @@ app.get("/api/dev/tickets", requireAuth, wrap(async (req, res) => {
   if (devOnly(req, res)) return;
   const rows = (await q(`select id, name, email, category, subject, message, status, seen, user_id, created_at from support_tickets order by (status = 'open') desc, created_at desc limit 300`)).rows;
   const c = (await q("select count(*) filter (where status = 'open')::int as open, count(*) filter (where status <> 'open')::int as resolved, count(*) filter (where not seen)::int as unseen from support_tickets")).rows[0];
-  res.json({ tickets: rows.map((t) => ({ id: t.id, ref: "NEON-" + t.id, name: t.name, email: t.email, category: TICKET_CATS[t.category] || "Something else", subject: t.subject, message: t.message, status: t.status, seen: t.seen, account: !!t.user_id, at: new Date(t.created_at).getTime() })), counts: c });
+  const norms = rows.map((t) => normEmail(t.email)), ids = rows.map((t) => t.id);
+  const reg = new Set(rows.length ? (await q("select email_norm from users where email_norm = any($1)", [norms])).rows.map((r) => r.email_norm) : []);
+  const aps = new Map(rows.length ? (await q("select email_norm, status, decided_at, expires_at from signup_approvals where email_norm = any($1)", [norms])).rows.map((r) => [r.email_norm, r]) : []);
+  const reps = rows.length ? (await q("select ticket_id, kind, body, by_user, sent_at from ticket_replies where ticket_id = any($1) order by sent_at", [ids])).rows : [];
+  res.json({
+    mail: MAIL_READY, counts: c,
+    tickets: rows.map((t, i) => {
+      const ap = aps.get(norms[i]); let apStatus = ap ? ap.status : null; if (apStatus === "approved" && new Date(ap.expires_at) < new Date()) apStatus = "expired";
+      return { id: t.id, ref: "NEON-" + t.id, name: t.name, email: t.email, category: TICKET_CATS[t.category] || "Something else", subject: t.subject, message: t.message, status: t.status, seen: t.seen, account: !!t.user_id, at: new Date(t.created_at).getTime(),
+        registered: reg.has(norms[i]), approval: apStatus ? { status: apStatus, at: new Date(ap.decided_at).getTime() } : null,
+        thread: reps.filter((r) => r.ticket_id === t.id).map((r) => ({ kind: r.kind, body: r.body, by: r.by_user, at: new Date(r.sent_at).getTime() })) };
+    }),
+  });
+}));
+const mailGuard = (req, res) => {
+  if (!MAIL_READY) { res.status(503).json({ error: "Email isn't set up on the server yet (the RESEND_API_KEY is missing)." }); return true; }
+  if (limited("devmail:" + req.user.id, 60, 3600e3)) { res.status(429).json({ error: "That's a lot of emails in an hour. Try again later." }); return true; }
+  return false;
+};
+const getTicket = async (req, res) => { const t = (await q("select * from support_tickets where id = $1", [Number(req.params.id) || 0])).rows[0]; if (!t) res.status(404).json({ error: "That ticket doesn't exist any more." }); return t; };
+const replyFoot = (t) => `You're getting this email because you sent a support ticket to NEON AI (reference <b>NEON-${t.id}</b>). This address can't receive replies: if you need to write back, open <i>Contact support</i> on the NEON AI website and send a new ticket.`;
+const failMail = (res, e, what) => { console.error(`${what} email failed:`, e.message); return res.status(502).json({ error: "Couldn't send the email. Check the sender (RESEND_API_KEY / MAIL_FROM) in Render. " + String(e.message).slice(0, 120) }); };
+// reply from the panel: the bot emails the person (no more emailing yourself)
+app.post("/api/dev/tickets/:id/reply", requireAuth, small, wrap(async (req, res) => {
+  if (devOnly(req, res) || mailGuard(req, res)) return;
+  const t = await getTicket(req, res); if (!t) return;
+  const body = String(req.body?.message ?? "").replace(/\r\n/g, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").trim().slice(0, 4000);
+  if (body.length < 2) return res.status(400).json({ error: "Write a message first." });
+  try { await sendMail({ to: t.email, subject: `Re: [NEON-${t.id}] ${t.subject}`, html: mailCard("A reply to your ticket", paras(body), null, replyFoot(t)), text: `${body}\n\n---\nTicket NEON-${t.id}: ${t.subject}\nThis address can't receive replies. To write back, use Contact support on the NEON AI website.` }); }
+  catch (e) { return failMail(res, e, "reply"); }
+  await q("insert into ticket_replies(ticket_id, kind, body, by_user) values($1, 'reply', $2, $3)", [t.id, body, req.user.username]);
+  await q("update support_tickets set seen = true, updated_at = now() where id = $1", [t.id]);
+  res.json({ ok: true });
+}));
+// approve: the email on the ticket may create an account (if it hasn't one); the bot emails a one-time sign-up link
+app.post("/api/dev/tickets/:id/approve", requireAuth, small, wrap(async (req, res) => {
+  if (devOnly(req, res) || mailGuard(req, res)) return;
+  const t = await getTicket(req, res); if (!t) return;
+  const email = t.email.trim().toLowerCase(), enorm = normEmail(email);
+  if ((await q("select 1 from users where email_norm = $1", [enorm])).rows[0]) return res.status(409).json({ error: "That email already has an account, so there's nothing to approve." });
+  const token = crypto.randomBytes(24).toString("hex"), link = `${publicBase(req)}/?signup=${token}`;
+  await q(`insert into signup_approvals(email_norm, email, token_hash, status, ticket_id, decided_by, note, expires_at, decided_at, used_at) values($1, $2, $3, 'approved', $4, $5, null, $6, now(), null)
+           on conflict (email_norm) do update set email = $2, token_hash = $3, status = 'approved', ticket_id = $4, decided_by = $5, note = null, expires_at = $6, decided_at = now(), used_at = null`,
+    [enorm, email, sha(token), t.id, req.user.username, new Date(Date.now() + APPROVAL_MS)]);
+  const nm = t.name ? ` ${escHtml(t.name)}` : "";
+  try {
+    await sendMail({ to: email, subject: "You're approved: create your NEON AI account", html: mailCard("You're approved 🎉", `<p style="margin:0 0 12px">Hi${nm}, thanks for getting in touch (ticket <b>NEON-${t.id}</b>).</p><p style="margin:0 0 12px">NEON AI isn't open for sign-ups yet, but we've approved <b>${escHtml(email)}</b> to create an account. Use the button below to start. You'll choose a username and password, then we'll send a 6-digit code to this address to confirm it.</p><p style="margin:0">The link works once, for this email address only, and expires in 14 days.</p>`, { url: link, label: "Create my account" }, `If you didn't ask for this, you can ignore this email and nothing will happen. Reference NEON-${t.id}.`),
+      text: `You're approved!\n\nHi${t.name ? " " + t.name : ""}, we've approved ${email} to create a NEON AI account (ticket NEON-${t.id}).\n\nCreate it here: ${link}\n\nThe link works once, for this email address only, and expires in 14 days. If you didn't ask for this, ignore this email.` });
+  } catch (e) { await q("delete from signup_approvals where email_norm = $1", [enorm]).catch(() => {}); return failMail(res, e, "approval"); }
+  await q("insert into ticket_replies(ticket_id, kind, body, by_user) values($1, 'approved', $2, $3)", [t.id, "Approved: the sign-up link was emailed (valid for 14 days, works once).", req.user.username]);
+  await q("update support_tickets set status = 'resolved', seen = true, updated_at = now() where id = $1", [t.id]);
+  console.log(`Sign-up approved for ${enorm} (ticket NEON-${t.id}) by ${req.user.username}`);
+  res.json({ ok: true });
+}));
+app.post("/api/dev/tickets/:id/decline", requireAuth, small, wrap(async (req, res) => {
+  if (devOnly(req, res) || mailGuard(req, res)) return;
+  const t = await getTicket(req, res); if (!t) return;
+  const email = t.email.trim().toLowerCase(), enorm = normEmail(email), reason = clip(req.body?.reason, 500);
+  if ((await q("select 1 from users where email_norm = $1", [enorm])).rows[0]) return res.status(409).json({ error: "That email already has an account." });
+  const nm = t.name ? ` ${escHtml(t.name)}` : "";
+  try {
+    await sendMail({ to: email, subject: "About your NEON AI account request", html: mailCard("About your account request", `<p style="margin:0 0 12px">Hi${nm}, thanks for your interest in NEON AI (ticket <b>NEON-${t.id}</b>).</p><p style="margin:0 0 12px">We're not able to create an account for <b>${escHtml(email)}</b> right now.</p>${reason ? `<p style="margin:0 0 12px"><b>Reason:</b> ${escHtml(reason)}</p>` : ""}<p style="margin:0">You're welcome to send another ticket if something changes or you think this is a mistake.</p>`, null, replyFoot(t)),
+      text: `Hi${t.name ? " " + t.name : ""}, thanks for your interest in NEON AI (ticket NEON-${t.id}).\n\nWe're not able to create an account for ${email} right now.${reason ? "\n\nReason: " + reason : ""}\n\nYou're welcome to send another ticket (Contact support on the website) if something changes or you think this is a mistake.` });
+  } catch (e) { return failMail(res, e, "decline"); }
+  await q(`insert into signup_approvals(email_norm, email, token_hash, status, ticket_id, decided_by, note, expires_at, decided_at, used_at) values($1, $2, null, 'declined', $3, $4, $5, null, now(), null)
+           on conflict (email_norm) do update set email = $2, token_hash = null, status = 'declined', ticket_id = $3, decided_by = $4, note = $5, expires_at = null, decided_at = now(), used_at = null`, [enorm, email, t.id, req.user.username, reason || null]);
+  await q("insert into ticket_replies(ticket_id, kind, body, by_user) values($1, 'declined', $2, $3)", [t.id, reason ? "Declined. Reason sent: " + reason : "Declined: the decline email was sent.", req.user.username]);
+  await q("update support_tickets set status = 'resolved', seen = true, updated_at = now() where id = $1", [t.id]);
+  res.json({ ok: true });
 }));
 app.post("/api/dev/tickets/:id", requireAuth, small, wrap(async (req, res) => {
   if (devOnly(req, res)) return;
@@ -537,15 +644,32 @@ app.delete("/api/dev/tickets/:id", requireAuth, wrap(async (req, res) => {
 // Signing in to an existing account is not affected. Set SIGNUPS_OPEN=1 in the environment to switch sign-ups on again.
 const SIGNUPS_OPEN = process.env.SIGNUPS_OPEN === "1";
 const SIGNUPS_CLOSED_MSG = "NEON AI does not allow account creation until the Privacy Policy and Terms of Service are complete and allow for public usage.";
-const signupsClosed = (res) => { if (SIGNUPS_OPEN) return false; res.status(403).json({ error: SIGNUPS_CLOSED_MSG, field: "closed" }); return true; };
+const closedReply = (res) => res.status(403).json({ error: SIGNUPS_CLOSED_MSG, field: "closed" });
+// An approved email (the owner approved its support ticket) may sign up while sign-ups are closed. The approval is a one-time link emailed to
+// that address (a token; only its hash is stored). It works once, for that email only, and expires after 14 days.
+const APPROVAL_MS = 14 * 24 * 3600e3;
+async function approvalFor(token) {
+  const t = String(token || ""); if (t.length < 20) return null;
+  return (await q("select * from signup_approvals where token_hash = $1 and status = 'approved' and expires_at > now()", [sha(t)])).rows[0] || null;
+}
+const markApprovalUsed = (enorm) => q("update signup_approvals set status = 'used', used_at = now(), token_hash = null where email_norm = $1 and status = 'approved'", [enorm]).catch(() => {});
+const maskEmail2 = (e) => { const [l, d] = String(e).split("@"); return (l.length > 2 ? l.slice(0, 2) : l.slice(0, 1)) + "***@" + d; };
+app.post("/api/signup/approval", small, wrap(async (req, res) => {          // the page checks an approval link (to show the approved email)
+  if (limited("aprcheck:" + req.ip, 30, 3600e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
+  const ap = await approvalFor(req.body?.token);
+  if (!ap) return res.status(404).json({ error: "This approval link isn't valid any more. It may have expired or already been used." });
+  res.json({ email: ap.email });
+}));
 app.post("/api/signup/start", small, wrap(async (req, res) => {
-  if (signupsClosed(res)) return;
+  const ap = SIGNUPS_OPEN ? null : await approvalFor(req.body?.approval);
+  if (!SIGNUPS_OPEN && !ap) return closedReply(res);
   if (limited("sstart:" + req.ip, 10, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
   const bad = checkSignupFields(req.body || {});
   if (bad) return res.status(400).json(bad);
   if (req.body?.agree !== true) return res.status(400).json({ error: "Please agree to the Terms and Privacy Policy to continue.", field: "agree" });
   if (!MAIL_READY) return res.status(503).json({ error: "Email sign-up isn't available yet. Try Continue with Google instead.", field: "email" });
   const { username, password } = req.body, em = req.body.email.trim().toLowerCase();
+  if (ap && normEmail(em) !== ap.email_norm) return res.status(403).json({ error: `This approval is for ${maskEmail2(ap.email)}. Use that email address.`, field: "email" });
   if (limited("smail:" + em, 5, 60 * 60e3)) return res.status(429).json({ error: "Too many codes sent to that email. Try again in an hour.", field: "email" });
   const { rows: dup } = await q("select username_lc = $1 as u, email_norm = $2 as e from users where username_lc = $1 or email_norm = $2", [username.toLowerCase(), normEmail(em)]);
   if (dup.some((r) => r.e)) return res.status(409).json({ error: "This email already has an account (email or Google). Please sign in instead.", field: "email" });
@@ -602,6 +726,7 @@ app.post("/api/signup/verify", small, wrap(async (req, res) => {
     throw e;
   }
   await q("delete from signup_pending where email = $1", [em]);
+  await markApprovalUsed(normEmail(em));
   await startSession(req, res, user.id, !!req.body?.remember);
   res.json(await mePayload(user));
 }));
@@ -621,9 +746,10 @@ app.post("/api/auth/google/start", small, wrap(async (req, res) => {
   if (!GOOGLE_ID || !GOOGLE_SECRET) return res.status(503).json({ error: "Google sign-in isn't set up yet." });
   if (limited("gstart:" + req.ip, 30, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
   const { username, password, remember } = req.body || {};
-  let name = null, hash = null;
+  let name = null, hash = null, ap = null;
   if (username !== undefined || password !== undefined) {   // creating an account: they picked a username and password first
-    if (signupsClosed(res)) return;
+    ap = SIGNUPS_OPEN ? null : await approvalFor(req.body?.approval);
+    if (!SIGNUPS_OPEN && !ap) return closedReply(res);
     const bad = checkSignupFields({ username, password, email: "x@x.xx" });
     if (bad) return res.status(400).json(bad);
     if (req.body?.agree !== true) return res.status(400).json({ error: "Please agree to the Terms and Privacy Policy to continue.", field: "agree" });
@@ -632,7 +758,7 @@ app.post("/api/auth/google/start", small, wrap(async (req, res) => {
   }
   const state = crypto.randomBytes(24).toString("base64url");
   await q("delete from google_pending where expires_at < now()");
-  await q("insert into google_pending(state,username,pass_hash,remember,expires_at) values($1,$2,$3,$4,$5)", [state, name, hash, !!remember, new Date(Date.now() + 10 * 60e3)]);
+  await q("insert into google_pending(state,username,pass_hash,remember,expires_at,approval_hash) values($1,$2,$3,$4,$5,$6)", [state, name, hash, !!remember, new Date(Date.now() + 10 * 60e3), ap ? sha(String(req.body.approval)) : null]);
   res.cookie(GCOOKIE, state, { httpOnly: true, sameSite: "lax", secure: req.secure, maxAge: 10 * 60e3, path: "/api/auth" });
   const u = new URL(GOOGLE_AUTH_URL);
   u.search = new URLSearchParams({ client_id: GOOGLE_ID, redirect_uri: googleRedirectUri(req), response_type: "code", scope: "openid email profile", state, prompt: "select_account" }).toString();
@@ -674,6 +800,10 @@ app.get("/api/auth/google/callback", wrap(async (req, res) => {
   if (user) { if (pic && pic !== user.avatar) await q("update users set avatar = $1 where id = $2", [pic, user.id]); }
   else if (!pend.username) return authFail(res, "There's no NEON AI account for that Google account yet. Choose Create account first.");   // signing in never makes an account: that needs the sign-up form and the Terms
   else {
+    if (!SIGNUPS_OPEN) {                                                                     // sign-ups are closed: only the approved email may create an account
+      const apr = pend.approval_hash ? (await q("select * from signup_approvals where token_hash = $1 and status = 'approved' and expires_at > now()", [pend.approval_hash])).rows[0] : null;
+      if (!apr || apr.email_norm !== enorm) return authFail(res, "That Google account's email isn't the one we approved. Use the approved email address.");
+    }
     // new account: the username they typed in the sign-up form (if it's still free), otherwise one made from their email
     const base = usernameFromEmail(email);
     const wanted = pend.username && !(await q("select 1 from users where username_lc = $1", [pend.username.toLowerCase()])).rows[0] ? pend.username : null;
@@ -693,6 +823,7 @@ app.get("/api/auth/google/callback", wrap(async (req, res) => {
       }
     }
     if (!user) return authFail(res, "Couldn't create your account. Please try again.");
+    if (created) await markApprovalUsed(enorm);
   }
   await startSession(req, res, user.id, !!pend.remember);
   res.redirect(created ? "/?welcome=1" : "/");
