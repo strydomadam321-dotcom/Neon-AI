@@ -92,3 +92,4 @@
 - Reply / approve / decline emails quote the person's original message in “…”; the decline reason and sent replies are shown in quotes too.
 - "Write with AI" in the reply composer: `POST /api/dev/tickets/:id/draft` (Gemini, 30/h, ticket text treated as untrusted) only fills the textarea; nothing is sent. The privacy policy mentions it.
 - Settings > Developer > Accounts: `GET /api/dev/accounts` (count, email vs Google, list with search, `NeonSupport.openAccounts`).
+- Accounts menu: each normal account has a trash button (not yours, not dev accounts: marked You/Dev). It opens a warning dialog (permanent, chats lost, Stripe plan NOT cancelled, type the username) and calls `DELETE /api/dev/accounts/:id` with `{confirm: username}` (dev only, 30/h, cascades chats/sessions; tickets stay). The row collapses with the springy morph.

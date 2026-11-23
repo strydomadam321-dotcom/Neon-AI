@@ -660,9 +660,23 @@ app.post("/api/dev/tickets/:id/decline", requireAuth, small, wrap(async (req, re
 // every account in the system (dev accounts only): how they signed up and what email they used
 app.get("/api/dev/accounts", requireAuth, wrap(async (req, res) => {
   if (devOnly(req, res)) return;
-  const rows = (await q("select id, username, email, email_verified, (google_sub is not null) as google, has_password, plan, created_at from users order by created_at desc limit 1000")).rows;
+  const rows = (await q("select id, username, email, email_norm, email_verified, (google_sub is not null) as google, has_password, plan, created_at from users order by created_at desc limit 1000")).rows;
   const c = (await q("select count(*)::int as total, count(*) filter (where google_sub is not null)::int as google from users")).rows[0];
-  res.json({ count: c.total, google: c.google, email: c.total - c.google, accounts: rows.map((u) => ({ id: u.id, username: u.username, email: u.email || null, verified: !!u.email_verified, method: u.google ? (u.has_password ? "Google + password" : "Google") : u.email ? "Email" : "Username only", plan: u.plan || "free", at: new Date(u.created_at).getTime() })) });
+  res.json({ count: c.total, google: c.google, email: c.total - c.google, accounts: rows.map((u) => ({ id: u.id, username: u.username, email: u.email || null, verified: !!u.email_verified, method: u.google ? (u.has_password ? "Google + password" : "Google") : u.email ? "Email" : "Username only", plan: u.plan || "free", at: new Date(u.created_at).getTime(), you: u.id === req.user.id, dev: isDevRow(u) })) });
+}));
+// permanently remove any normal account (dev accounts only). Needs the username typed as confirmation; never your own or another dev account.
+app.delete("/api/dev/accounts/:id", requireAuth, small, wrap(async (req, res) => {
+  if (devOnly(req, res)) return;
+  if (limited("devdel:" + req.user.id, 30, 3600e3)) return res.status(429).json({ error: "Too many removals this hour. Try again later." });
+  const id = Number(req.params.id) || 0;
+  const u = (await q("select id, username, email_norm, email_verified from users where id = $1", [id])).rows[0];
+  if (!u) return res.status(404).json({ error: "That account doesn't exist any more." });
+  if (u.id === req.user.id) return res.status(403).json({ error: "You can't remove your own account here. Use Settings > Delete account." });
+  if (isDevRow(u)) return res.status(403).json({ error: "Developer accounts can't be removed here." });
+  if (String(req.body?.confirm || "").trim().toLowerCase() !== u.username.toLowerCase()) return res.status(400).json({ error: "Type the username exactly to confirm. Nothing was removed." });
+  await q("delete from users where id = $1", [u.id]);                     // chats, sessions, usage and so on go with it; their tickets stay (unlinked)
+  console.log(`Account ${u.username} (#${u.id}) removed by ${req.user.username}`);
+  res.json({ ok: true });
 }));
 app.post("/api/dev/tickets/:id", requireAuth, small, wrap(async (req, res) => {
   if (devOnly(req, res)) return;

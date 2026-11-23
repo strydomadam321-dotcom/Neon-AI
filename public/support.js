@@ -214,7 +214,7 @@
   function paintAccounts() {
     const q = (acc.querySelector("#accSearch").value || "").trim().toLowerCase(), list = (accData ? accData.accounts : []).filter((u) => !q || u.username.toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q));
     acc.querySelector("#accSub").textContent = accData ? `${accData.count} account${accData.count === 1 ? "" : "s"}: ${accData.email} with email, ${accData.google} with Google` : "Loading...";
-    acc.querySelector("#accList").innerHTML = list.length ? list.map((u, i) => `<div class="acc-row" style="--i:${Math.min(i, 10)}"><span class="av">${esc(u.username[0] || "?")}</span><span class="mid"><b>${esc(u.username)}</b><small>${u.email ? esc(u.email) : "No email"}${u.email && !u.verified ? " (not verified)" : ""}</small></span><span class="chip ${u.method.startsWith("Google") ? "g" : ""}">${esc(u.method)}</span><span class="chip">${esc(u.plan)}</span><time>${esc(new Date(u.at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }))}</time></div>`).join("") : `<p class="inb-empty">${accData ? "No accounts match." : "Loading..."}</p>`;
+    acc.querySelector("#accList").innerHTML = list.length ? list.map((u, i) => `<div class="acc-row" style="--i:${Math.min(i, 10)}"><span class="av">${esc(u.username[0] || "?")}</span><span class="mid"><b>${esc(u.username)}</b><small>${u.email ? esc(u.email) : "No email"}${u.email && !u.verified ? " (not verified)" : ""}</small></span><span class="chip ${u.method.startsWith("Google") ? "g" : ""}">${esc(u.method)}</span><span class="chip">${esc(u.plan)}</span><time>${esc(new Date(u.at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }))}</time>${u.you || u.dev ? `<span class="acc-keep" title="${u.you ? "This is you" : "Developer account"}">${u.you ? "You" : "Dev"}</span>` : `<button type="button" class="acc-del" data-id="${u.id}" aria-label="Remove ${esc(u.username)}" title="Remove account">${H.icon("trash")}</button>`}</div>`).join("") : `<p class="inb-empty">${accData ? "No accounts match." : "Loading..."}</p>`;
   }
   async function openAccounts() {
     if (!acc) {
@@ -225,6 +225,24 @@
       acc.querySelector("#accX").onclick = closeAcc; acc.onmousedown = (e) => { if (e.target === acc) closeAcc(); };
       acc.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); closeAcc(); } });
       acc.querySelector("#accSearch").oninput = paintAccounts;
+      acc.querySelector("#accList").onclick = async (e) => {
+        const btn = e.target.closest(".acc-del"); if (!btn) return;
+        const u = accData && accData.accounts.find((x) => String(x.id) === btn.dataset.id); if (!u) return;
+        const paid = u.plan && u.plan !== "free";
+        const typed = await H.dialog({ title: `Remove ${u.username}?`, message: `This permanently deletes the account${u.email ? " (" + u.email + ")" : ""} and ALL of its chats, files and settings. It cannot be undone and they will be signed out at once.${paid ? ` They are on the ${u.plan} plan: a Stripe subscription is NOT cancelled by this, so cancel it in Stripe first or they keep being charged.` : ""} Their support tickets stay. Type the username to confirm.`, input: "", placeholder: u.username, ok: "Remove account", danger: true });
+        if (typed === null || typed === false) return;
+        if (String(typed).trim().toLowerCase() !== u.username.toLowerCase()) { H.toast("That isn't the username. Nothing was removed.", "err"); return; }
+        btn.disabled = true;
+        try {
+          await H.api(`/api/dev/accounts/${u.id}`, { method: "DELETE", body: { confirm: String(typed).trim() } });
+          const row = btn.closest(".acc-row"), h = row.getBoundingClientRect().height;
+          const an = row.animate([{ height: h + "px", opacity: 1, filter: "blur(0)", marginBottom: "0px" }, { height: "0px", opacity: 0, filter: "blur(6px)", marginBottom: "-6px", paddingTop: "0px", paddingBottom: "0px" }], { duration: 600, easing: "cubic-bezier(.3, 1.25, .4, 1)", fill: "forwards" });
+          row.style.overflow = "hidden"; await an.finished.catch(() => {});
+          accData.accounts = accData.accounts.filter((x) => x.id !== u.id); accData.count--; if (u.method.startsWith("Google")) accData.google--; else accData.email--;
+          H.onAccounts && H.onAccounts(accData.count); paintAccounts(); accountCount().then(paintAccounts);
+          H.toast(`Removed ${u.username}.`);
+        } catch (err) { btn.disabled = false; H.toast(err.message || "Couldn't remove that account.", "err"); }
+      };
       document.addEventListener("keydown", (e) => { if (e.key === "Escape" && acc && !acc.classList.contains("hidden") && !acc.classList.contains("out")) { const dlg = document.getElementById("dialog"); if (dlg && !dlg.classList.contains("hidden")) return; e.stopImmediatePropagation(); closeAcc(); } }, true);
     }
     acc.classList.remove("hidden", "out"); accData = null; paintAccounts(); await accountCount(); paintAccounts(); acc.querySelector("#accSearch").focus({ preventScroll: true });
