@@ -284,6 +284,18 @@ catch (e) { console.warn("users_email_norm_uq not created (duplicate emails exis
   const r = await q("insert into meta(key) values('rm-user-asdfefeweffas') on conflict do nothing returning key");
   if (r.rowCount) { const d = await q("delete from users where username_lc = 'asdfefeweffas'"); console.log(`Housekeeping: removed test account asdfefeweffas (${d.rowCount} found)`); }
 }
+// one-time cleanup requested by the owner: everything for one test email (account, sign-up leftovers, approval, tickets and their replies). Runs once.
+{
+  const r = await q("insert into meta(key) values('rm-email-94785-churchie') on conflict do nothing returning key");
+  if (r.rowCount) {
+    const em = "94785@churchie.com.au";
+    const u = await q("delete from users where email_norm = $1 or lower(email) = $1", [normEmail(em)]);
+    const t = await q("delete from support_tickets where lower(email) = $1", [em]);
+    const a = await q("delete from signup_approvals where email_norm = $1 or lower(email) = $1", [normEmail(em)]);
+    const p = await q("delete from signup_pending where lower(email) = $1", [em]);
+    console.log(`Housekeeping: removed ${em}: ${u.rowCount} account(s), ${t.rowCount} ticket(s), ${a.rowCount} approval(s), ${p.rowCount} pending sign-up(s)`);
+  }
+}
 const cleanup = () => { q("delete from sessions where expires_at < now()").catch(() => {}); q("delete from signup_pending where expires_at < now() - interval '1 hour'").catch(() => {}); };
 cleanup();
 setInterval(cleanup, 60 * 60 * 1000).unref();
@@ -406,17 +418,17 @@ app.use((req, res, next) => {
   });
   next();
 });
-// The approval email's link (/?signup=<token>): the first visit uses it up and gives this browser a 2-hour approval cookie; any later visit is a 404.
+// The approval email's link (/?signup=<token>): while it is unused the page loads normally (the page then CLAIMS it with POST /api/signup/claim, which uses it up and
+// gives that browser a 2-hour approval cookie). Opening the link only loads the page, so an email scanner that just fetches it does not burn it. Used, expired or made-up = 404.
 const NOT_FOUND_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>404 - Page not found</title><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b10;color:#e8e8f0;font-family:system-ui,sans-serif;text-align:center"><div><div style="font-size:72px;font-weight:800;letter-spacing:2px">404</div><p style="opacity:.7;margin:8px 0 0">Page not found</p></div></body>`;
 app.use(async (req, res, next) => {
   if (req.method !== "GET" || (req.path !== "/" && req.path !== "/index.html") || typeof req.query.signup !== "string") return next();
   if (SIGNUPS_OPEN) return res.redirect("/");
   try {
-    const raw = req.query.signup.trim(), secret = crypto.randomBytes(24).toString("base64url");
-    const r = raw.length >= 20 ? await q("update signup_approvals set status = 'opened', token_hash = $2, expires_at = now() + interval '2 hours' where token_hash = $1 and status = 'approved' and expires_at > now() returning email_norm", [sha(raw), sha("opened:" + secret)]) : { rowCount: 0 };
-    if (!r.rowCount) return res.status(404).set("Cache-Control", "no-store").type("html").send(NOT_FOUND_PAGE);
-    res.cookie(APPROVAL_COOKIE, secret, { httpOnly: true, sameSite: "lax", secure: req.secure, maxAge: APPROVAL_SESSION_MS, path: "/" });
-    res.set("Cache-Control", "no-store").redirect("/");
+    const raw = req.query.signup.trim();
+    const ok = raw.length >= 20 && (await q("select 1 from signup_approvals where token_hash = $1 and status = 'approved' and expires_at > now()", [sha(raw)])).rowCount;
+    if (!ok) return res.status(404).set("Cache-Control", "no-store").type("html").send(NOT_FOUND_PAGE);
+    return next();
   } catch (e) { console.error("approval link:", e.message); res.status(500).type("text").send("Something went wrong. Try again."); }
 });
 app.use(express.static(path.join(__dirname, "public"), { setHeaders: (res) => res.set("Cache-Control", "no-cache") }));
@@ -706,6 +718,14 @@ async function approvalFor(req) {
   return (await q("select * from signup_approvals where token_hash = $1 and status = 'opened' and expires_at > now()", [sha("opened:" + c)])).rows[0] || null;
 }
 const markApprovalUsed = (enorm) => q("update signup_approvals set status = 'used', used_at = now(), token_hash = null where email_norm = $1 and status = 'opened'", [enorm]).catch(() => {});
+app.post("/api/signup/claim", small, wrap(async (req, res) => {            // the page uses the emailed link up (once) and this browser becomes the approved one
+  if (limited("aprclaim:" + req.ip, 30, 3600e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
+  const raw = String(req.body?.token || "").trim(), secret = crypto.randomBytes(24).toString("base64url");
+  const r = raw.length >= 20 ? await q("update signup_approvals set status = 'opened', token_hash = $2, expires_at = now() + interval '2 hours' where token_hash = $1 and status = 'approved' and expires_at > now() returning email_norm", [sha(raw), sha("opened:" + secret)]) : { rowCount: 0 };
+  if (!r.rowCount) return res.status(404).json({ error: "This link isn't valid any more." });
+  res.cookie(APPROVAL_COOKIE, secret, { httpOnly: true, sameSite: "lax", secure: req.secure, maxAge: APPROVAL_SESSION_MS, path: "/" });
+  res.json({ ok: true });
+}));
 app.post("/api/signup/approval", small, wrap(async (req, res) => {          // does this browser hold a valid approval? (the page shows "You're approved")
   if (limited("aprcheck:" + req.ip, 60, 3600e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
   const ap = await approvalFor(req);

@@ -1816,8 +1816,8 @@ async function enterApp(data) {
 }
 
 (async function init() {
-  const qs = new URLSearchParams(location.search), authErr = qs.get("auth_error"), welcome = qs.has("welcome"), billing = qs.get("billing");
-  if (authErr || welcome || billing) history.replaceState(null, "", location.pathname);
+  const qs = new URLSearchParams(location.search), authErr = qs.get("auth_error"), welcome = qs.has("welcome"), billing = qs.get("billing"), signupTok = qs.get("signup");
+  if (authErr || welcome || billing || signupTok) history.replaceState(null, "", location.pathname);
   try { config = await (await fetch("/api/config")).json(); } catch {}
   try {
     const data = await api("/api/me", { noAuthRedirect: true });
@@ -1828,6 +1828,7 @@ async function enterApp(data) {
   } catch {
     showAuth(authErr || "");
     if (authErr) toast(authErr, "err");
-    if (config.signupsOpen !== true) { await checkApproval(true); }
+    if (signupTok && config.signupsOpen !== true) { try { await api("/api/signup/claim", { method: "POST", noAuthRedirect: true, body: { token: signupTok } }); } catch {} }   // the emailed link: use it up, this browser is then approved
+    if (config.signupsOpen !== true) { await checkApproval(!!signupTok); }
   }
 })();
