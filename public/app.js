@@ -1828,7 +1828,11 @@ async function enterApp(data) {
   } catch {
     showAuth(authErr || "");
     if (authErr) toast(authErr, "err");
-    if (signupTok && config.signupsOpen !== true) { try { await api("/api/signup/claim", { method: "POST", noAuthRedirect: true, body: { token: signupTok } }); } catch {} }   // the emailed link: use it up, this browser is then approved
+    if (signupTok && config.signupsOpen !== true) {      // the emailed link: a real person presses Continue, which uses the link up (bots that only open the page never do)
+      await dialog({ title: "You're approved", message: "NEON AI isn't open for sign-ups yet, but you've been approved to create an account as a beta tester. Press Continue to start.", ok: "Continue", cancel: false });
+      try { await api("/api/signup/claim", { method: "POST", noAuthRedirect: true, body: { token: signupTok } }); }
+      catch (e) { toast(e.message || "This link isn't valid any more.", "err"); }
+    }
     if (config.signupsOpen !== true) { await checkApproval(!!signupTok); }
   }
 })();

@@ -427,6 +427,7 @@ app.use(async (req, res, next) => {
   try {
     const raw = req.query.signup.trim();
     const ok = raw.length >= 20 && (await q("select 1 from signup_approvals where token_hash = $1 and status = 'approved' and expires_at > now()", [sha(raw)])).rowCount;
+    console.log(`approval link ${ok ? "opened (page served)" : "refused (404)"} ua="${String(req.get("user-agent") || "").slice(0, 70)}"`);
     if (!ok) return res.status(404).set("Cache-Control", "no-store").type("html").send(NOT_FOUND_PAGE);
     return next();
   } catch (e) { console.error("approval link:", e.message); res.status(500).type("text").send("Something went wrong. Try again."); }
@@ -722,6 +723,7 @@ app.post("/api/signup/claim", small, wrap(async (req, res) => {            // th
   if (limited("aprclaim:" + req.ip, 30, 3600e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
   const raw = String(req.body?.token || "").trim(), secret = crypto.randomBytes(24).toString("base64url");
   const r = raw.length >= 20 ? await q("update signup_approvals set status = 'opened', token_hash = $2, expires_at = now() + interval '2 hours' where token_hash = $1 and status = 'approved' and expires_at > now() returning email_norm", [sha(raw), sha("opened:" + secret)]) : { rowCount: 0 };
+  console.log(`approval link ${r.rowCount ? "claimed" : "claim refused"} ua="${String(req.get("user-agent") || "").slice(0, 70)}"`);
   if (!r.rowCount) return res.status(404).json({ error: "This link isn't valid any more." });
   res.cookie(APPROVAL_COOKIE, secret, { httpOnly: true, sameSite: "lax", secure: req.secure, maxAge: APPROVAL_SESSION_MS, path: "/" });
   res.json({ ok: true });
