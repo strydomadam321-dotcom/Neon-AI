@@ -242,7 +242,7 @@ async function googleGo() {
   googleBusy(true);
   try {
     const body = { remember: $("remember").checked };
-    if (mode === "signup") { body.username = authEls.user.value.trim(); body.password = authEls.pass.value; body.agree = true; if (approval.ok) body.approval = approval.token; }   // the username they chose is kept
+    if (mode === "signup") { body.username = authEls.user.value.trim(); body.password = authEls.pass.value; body.agree = true; }   // the username they chose is kept
     const d = await api("/api/auth/google/start", { method: "POST", noAuthRedirect: true, body });
     location.href = d.url;
   } catch (err) {
@@ -263,7 +263,7 @@ const authEls = { form: $("authForm"), user: $("username"), pass: $("password"),
 
 // "Create account" while sign-ups are closed: the form and the notice swap places with the same springy height morph as the sign-up steps
 let closedShown = false, swapT = 0;
-const approval = { token: "", email: "", ok: false };      // set when the page is opened from an approval email (?signup=...)
+const approval = { ok: false };      // set when this browser holds an approval (opened from the approval email)
 function showClosedNote(on, instant) {
   if (on === closedShown) return;
   const wrap = $("authBody"), form = $("formC"), note = $("closedC");
@@ -278,16 +278,13 @@ function showClosedNote(on, instant) {
     an.onfinish = an.oncancel = () => { wrap.style.height = ""; wrap.classList.remove("morphing"); to.classList.remove("swap-in"); };
   }, 220);
 }
-// an approval email's link: the page opens the normal sign-up with the approved email locked in
-function dropApproval() { approval.ok = false; approval.token = ""; $("email").readOnly = false; }
-async function checkApproval(token) {
+// an approval email's link: the server uses the link up and gives this browser an approval cookie; the page just asks whether it has one
+function dropApproval() { approval.ok = false; }
+async function checkApproval(announce) {
   try {
-    const d = await api("/api/signup/approval", { method: "POST", noAuthRedirect: true, body: { token } });
-    Object.assign(approval, { token, email: d.email, ok: true });
-    $("approvedEmail").textContent = d.email; $("email").value = d.email; $("email").readOnly = true;
-    $("codeC").classList.remove("open"); $("codeInput").value = "";
-    setMode("signup"); toast("You're approved! Create your account below.", "ok");
-  } catch (e) { toast(e.message || "That approval link isn't valid.", "err"); }
+    await api("/api/signup/approval", { method: "POST", noAuthRedirect: true, body: {} });
+    approval.ok = true; setMode("signup", true); if (announce) toast("You're approved! Create your account below.", "ok");
+  } catch { approval.ok = false; }
 }
 function setMode(m, instant) {
   mode = m;
@@ -308,13 +305,6 @@ function setMode(m, instant) {
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => { if (t.dataset.mode !== mode) setMode(t.dataset.mode); }));
 
 $("closedBack").onclick = () => setMode("login");
-$("codeToggle").onclick = () => { const c = $("codeC"), open = c.classList.toggle("open"); if (open) setTimeout(() => $("codeInput").focus({ preventScroll: true }), 350); };
-const codeSubmit = async () => {
-  const v = $("codeInput").value.trim(); if (v.replace(/[^A-Za-z0-9]/g, "").length < 10) { toast("Type the 10-character code from the email.", "err"); return; }
-  const b = $("codeGo"); b.disabled = true; try { await checkApproval(v); } finally { b.disabled = false; }
-};
-$("codeGo").onclick = codeSubmit;
-$("codeInput").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); codeSubmit(); } };
 $("closedSupport").onclick = () => NeonSupport.open({ suggest: "account" });
 $("googleBtn").onclick = googleGo; $("googleBtn2").onclick = googleGo;
 addEventListener("pageshow", (e) => { if (e.persisted) googleBusy(false); });   // coming back from Google with the Back button
@@ -396,7 +386,7 @@ authEls.form.onsubmit = async (e) => {
     if (mode === "login") data = await api("/api/login", { method: "POST", noAuthRedirect: true, body: { username, password, remember: $("remember").checked } });
     else if (step === 2) {
       // email route: send the code, then slide to the code screen
-      const d = await api("/api/signup/start", { method: "POST", noAuthRedirect: true, body: { username, password, email, agree: true, ...(approval.ok ? { approval: approval.token } : {}) } });
+      const d = await api("/api/signup/start", { method: "POST", noAuthRedirect: true, body: { username, password, email, agree: true } });
       signupEmail = email.toLowerCase(); $("codeSub").textContent = `We sent a 6-digit code to ${d.email}. It's valid for 10 minutes.`;
       otpS.clear(); startResendCooldown(d.cooldown || 30); goStep(3);
       return;
@@ -1825,8 +1815,8 @@ async function enterApp(data) {
 }
 
 (async function init() {
-  const qs = new URLSearchParams(location.search), authErr = qs.get("auth_error"), welcome = qs.has("welcome"), billing = qs.get("billing"), signupTok = qs.get("signup");
-  if (authErr || welcome || billing || signupTok) history.replaceState(null, "", location.pathname);
+  const qs = new URLSearchParams(location.search), authErr = qs.get("auth_error"), welcome = qs.has("welcome"), billing = qs.get("billing");
+  if (authErr || welcome || billing) history.replaceState(null, "", location.pathname);
   try { config = await (await fetch("/api/config")).json(); } catch {}
   try {
     const data = await api("/api/me", { noAuthRedirect: true });
@@ -1837,6 +1827,6 @@ async function enterApp(data) {
   } catch {
     showAuth(authErr || "");
     if (authErr) toast(authErr, "err");
-    if (signupTok) checkApproval(signupTok);
+    if (config.signupsOpen !== true) { await checkApproval(true); }
   }
 })();

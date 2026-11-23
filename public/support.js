@@ -154,9 +154,9 @@
   function acctRow(t) {
     if (t.registered) return `<div class="inb-acct"><span class="st"><b>This email already has an account.</b> Nothing to approve.</span></div>`;
     const a = t.approval, when = a ? new Date(a.at).toLocaleDateString([], { day: "numeric", month: "short" }) : "";
-    const st = !a ? "This email has <b>no account</b> yet and sign-ups are closed." : a.status === "approved" ? `<b>Approved</b> on ${esc(when)}. An approval code was emailed; it works once.` : a.status === "expired" ? `<b>Approved</b> on ${esc(when)}, but the code has <b>expired</b>.` : a.status === "declined" ? `<b>Declined</b> on ${esc(when)}.` : `Account <b>created</b> from the approval.`;
+    const st = !a ? "This email has <b>no account</b> yet and sign-ups are closed." : a.status === "approved" || a.status === "opened" ? `<b>Approved</b> on ${esc(when)}. A one-time sign-up link was emailed; it works once.` : a.status === "expired" ? `<b>Approved</b> on ${esc(when)}, but the link has <b>expired</b>.` : a.status === "declined" ? `<b>Declined</b> on ${esc(when)}.` : `Account <b>created</b> from the approval.`;
     if (a && a.status === "used") return `<div class="inb-acct"><span class="st">${st}</span></div>`;
-    return `<div class="inb-acct"><span class="st">${st}</span><button type="button" class="btn good small" id="inbApprove">${H.icon("check")}<span>${a && (a.status === "approved" || a.status === "expired") ? "Send a new code" : "Approve account"}</span></button>${a && a.status === "declined" ? "" : `<button type="button" class="btn danger small" id="inbDecline">${H.icon("x")}<span>Decline</span></button>`}</div>`;
+    return `<div class="inb-acct"><span class="st">${st}</span><button type="button" class="btn good small" id="inbApprove">${H.icon("check")}<span>${a && (a.status === "approved" || a.status === "opened" || a.status === "expired") ? "Send a new link" : "Approve account"}</span></button>${a && a.status === "declined" ? "" : `<button type="button" class="btn danger small" id="inbDecline">${H.icon("x")}<span>Decline</span></button>`}</div>`;
   }
   async function busy(btn, fn) { const html = btn.innerHTML; btn.disabled = true; btn.innerHTML = "<span>Sending...</span>"; try { return await fn(); } finally { btn.disabled = false; btn.innerHTML = html; } }
   async function sendReply(t, text, btn) {
@@ -174,8 +174,8 @@
     finally { btn.disabled = false; btn.innerHTML = html; box.classList.remove("writing"); }
   }
   async function approve(t, btn) {
-    if (!(await H.dialog({ title: "Approve this account?", message: `${t.email} will get an email from NEON AI with a one-time approval code to create an account, even though sign-ups are closed. The ticket will be marked resolved.`, ok: "Approve and email" }))) return;
-    try { await busy(btn, () => H.api(`/api/dev/tickets/${t.id}/approve`, { method: "POST", body: {} })); H.toast("Approved. The approval code was emailed to " + t.email + "."); follow = t.id; await load(true); } catch (e) { H.toast(e.message, "err"); }
+    if (!(await H.dialog({ title: "Approve this account?", message: `${t.email} will get an email from NEON AI with a one-time sign-up link to create an account (any email or Google account), even though sign-ups are closed. The ticket will be marked resolved.`, ok: "Approve and email" }))) return;
+    try { await busy(btn, () => H.api(`/api/dev/tickets/${t.id}/approve`, { method: "POST", body: {} })); H.toast("Approved. The sign-up link was emailed to " + t.email + "."); follow = t.id; await load(true); } catch (e) { H.toast(e.message, "err"); }
   }
   async function decline(t, btn) {
     const reason = await H.dialog({ title: "Decline this account?", message: `${t.email} will get an email saying we can't create an account right now. You can add a reason (they will see it), or leave it empty.`, input: "", placeholder: "Optional reason", ok: "Decline and email", danger: true });

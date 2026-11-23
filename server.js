@@ -406,6 +406,19 @@ app.use((req, res, next) => {
   });
   next();
 });
+// The approval email's link (/?signup=<token>): the first visit uses it up and gives this browser a 2-hour approval cookie; any later visit is a 404.
+const NOT_FOUND_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>404 - Page not found</title><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b10;color:#e8e8f0;font-family:system-ui,sans-serif;text-align:center"><div><div style="font-size:72px;font-weight:800;letter-spacing:2px">404</div><p style="opacity:.7;margin:8px 0 0">Page not found</p></div></body>`;
+app.use(async (req, res, next) => {
+  if (req.method !== "GET" || (req.path !== "/" && req.path !== "/index.html") || typeof req.query.signup !== "string") return next();
+  if (SIGNUPS_OPEN) return res.redirect("/");
+  try {
+    const raw = req.query.signup.trim(), secret = crypto.randomBytes(24).toString("base64url");
+    const r = raw.length >= 20 ? await q("update signup_approvals set status = 'opened', token_hash = $2, expires_at = now() + interval '2 hours' where token_hash = $1 and status = 'approved' and expires_at > now() returning email_norm", [sha(raw), sha("opened:" + secret)]) : { rowCount: 0 };
+    if (!r.rowCount) return res.status(404).set("Cache-Control", "no-store").type("html").send(NOT_FOUND_PAGE);
+    res.cookie(APPROVAL_COOKIE, secret, { httpOnly: true, sameSite: "lax", secure: req.secure, maxAge: APPROVAL_SESSION_MS, path: "/" });
+    res.set("Cache-Control", "no-store").redirect("/");
+  } catch (e) { console.error("approval link:", e.message); res.status(500).type("text").send("Something went wrong. Try again."); }
+});
 app.use(express.static(path.join(__dirname, "public"), { setHeaders: (res) => res.set("Cache-Control", "no-cache") }));
 
 // ---------- helpers ----------
@@ -563,7 +576,7 @@ app.get("/api/dev/tickets", requireAuth, wrap(async (req, res) => {
   res.json({
     mail: MAIL_READY, counts: c,
     tickets: rows.map((t, i) => {
-      const ap = aps.get(norms[i]); let apStatus = ap ? ap.status : null; if (apStatus === "approved" && new Date(ap.expires_at) < new Date()) apStatus = "expired";
+      const ap = aps.get(norms[i]); let apStatus = ap ? ap.status : null; if ((apStatus === "approved" || apStatus === "opened") && new Date(ap.expires_at) < new Date()) apStatus = "expired";
       return { id: t.id, ref: "NEON-" + t.id, name: t.name, email: t.email, category: TICKET_CATS[t.category] || "Something else", subject: t.subject, message: t.message, status: t.status, seen: t.seen, account: !!t.user_id, at: new Date(t.created_at).getTime(),
         registered: reg.has(norms[i]), approval: apStatus ? { status: apStatus, at: new Date(ap.decided_at).getTime() } : null,
         thread: reps.filter((r) => r.ticket_id === t.id).map((r) => ({ kind: r.kind, body: r.body, by: r.by_user, at: new Date(r.sent_at).getTime() })) };
@@ -607,26 +620,26 @@ app.post("/api/dev/tickets/:id/draft", requireAuth, small, wrap(async (req, res)
   if (!text) return res.status(502).json({ error: "Gemini returned an empty draft. Try again." });
   res.json({ text });
 }));
-// approve: the email on the ticket may create an account (if it hasn't one); the bot emails a one-time approval CODE (no link)
+// approve: the email on the ticket may create an account (if it hasn't one); the bot emails a ONE-TIME link to the sign-up page
 app.post("/api/dev/tickets/:id/approve", requireAuth, small, wrap(async (req, res) => {
   if (devOnly(req, res) || mailGuard(req, res)) return;
   const t = await getTicket(req, res); if (!t) return;
   const email = t.email.trim().toLowerCase(), enorm = normEmail(email);
   if ((await q("select 1 from users where email_norm = $1", [enorm])).rows[0]) return res.status(409).json({ error: "That email already has an account, so there's nothing to approve." });
-  const code = newApprovalCode();
+  const token = crypto.randomBytes(24).toString("hex");
+  const link = `${publicBase(req)}/?signup=${token}`;
   await q(`insert into signup_approvals(email_norm, email, token_hash, status, ticket_id, decided_by, note, expires_at, decided_at, used_at) values($1, $2, $3, 'approved', $4, $5, null, $6, now(), null)
            on conflict (email_norm) do update set email = $2, token_hash = $3, status = 'approved', ticket_id = $4, decided_by = $5, note = null, expires_at = $6, decided_at = now(), used_at = null`,
-    [enorm, email, approvalHash(code), t.id, req.user.username, new Date(Date.now() + APPROVAL_MS)]);
+    [enorm, email, sha(token), t.id, req.user.username, new Date(Date.now() + APPROVAL_MS)]);
   const nm = t.name ? ` ${escHtml(t.name)}` : "";
-  const steps = ["Open the NEON AI website", "Tap <b>Create account</b>", "Tap <b>I have an approval code</b> and type the code above", "Choose a username and password, then type the 6-digit code we email you to confirm this address"];
   try {
-    await sendMail({ to: email, subject: "Your NEON AI account is approved", html: mailCard("You're approved 🎉", `<p style="margin:0 0 12px">Hi${nm}, thanks for getting in touch (ticket <b>NEON-${t.id}</b>).</p><p style="margin:0 0 12px">NEON AI isn't open for sign-ups yet, but we've approved <b>${escHtml(email)}</b> to create an account.</p><p style="margin:0 0 6px;font-size:13px;color:#777">Your approval code</p><div style="font-size:30px;letter-spacing:5px;font-weight:700;background:#f3f1ff;border-radius:12px;padding:14px 0;text-align:center;font-family:ui-monospace,Menlo,Consolas,monospace;color:#111">${code}</div><ol style="margin:16px 0 12px;padding-left:20px">${steps.map((x) => `<li style="margin:0 0 5px">${x}</li>`).join("")}</ol><p style="margin:0">The code works once, for this email address only, and expires in 14 days.</p>` + quoteBlock(t), null, `If you didn't ask for this, you can ignore this email and nothing will happen. Reference NEON-${t.id}.`),
-      text: `You're approved!\n\nHi${t.name ? " " + t.name : ""}, thanks for getting in touch (ticket NEON-${t.id}). We've approved ${email} to create a NEON AI account.\n\nYour approval code: ${code}\n\n1. Open the NEON AI website\n2. Tap Create account\n3. Tap "I have an approval code" and type the code\n4. Choose a username and password, then type the 6-digit code we email you\n\nThe code works once, for this email address only, and expires in 14 days. If you didn't ask for this, ignore this email.${quoteText(t)}` });
+    await sendMail({ to: email, subject: "Your NEON AI account is approved", html: mailCard("You're approved 🎉", `<p style="margin:0 0 12px">Hi${nm}, thanks for getting in touch (ticket <b>NEON-${t.id}</b>).</p><p style="margin:0 0 12px">NEON AI isn't open for sign-ups yet, but we've approved <b>${escHtml(email)}</b> to create an account as a beta tester.</p><p style="margin:0 0 12px">Use the button below to open the sign-up page and create your account as normal, with any email or Google account you like.</p><p style="margin:0 0 12px;font-size:13px;color:#777">The link works once and expires in 14 days, so please don't share it.</p>` + quoteBlock(t), { label: "Create my account", url: link }, `If you didn't ask for this, you can ignore this email and nothing will happen. Reference NEON-${t.id}.`),
+      text: `You're approved!\n\nHi${t.name ? " " + t.name : ""}, thanks for getting in touch (ticket NEON-${t.id}). NEON AI isn't open for sign-ups yet, but we've approved ${email} to create an account as a beta tester.\n\nOpen this link to sign up as normal, with any email or Google account you like:\n${link}\n\nThe link works once and expires in 14 days, so please don't share it. If you didn't ask for this, ignore this email.${quoteText(t)}` });
   } catch (e) { await q("delete from signup_approvals where email_norm = $1", [enorm]).catch(() => {}); return failMail(res, e, "approval"); }
-  await q("insert into ticket_replies(ticket_id, kind, body, by_user) values($1, 'approved', $2, $3)", [t.id, `Approved. The approval code ${code} was emailed (valid for 14 days, works once).`, req.user.username]);
+  await q("insert into ticket_replies(ticket_id, kind, body, by_user) values($1, 'approved', $2, $3)", [t.id, "Approved as a beta tester. A one-time sign-up link was emailed (valid for 14 days, works once, any email or Google account).", req.user.username]);
   await q("update support_tickets set status = 'resolved', seen = true, updated_at = now() where id = $1", [t.id]);
   console.log(`Sign-up approved for ${enorm} (ticket NEON-${t.id}) by ${req.user.username}`);
-  res.json({ ok: true, code });
+  res.json({ ok: true });
 }));
 app.post("/api/dev/tickets/:id/decline", requireAuth, small, wrap(async (req, res) => {
   if (devOnly(req, res) || mailGuard(req, res)) return;
@@ -670,31 +683,23 @@ app.delete("/api/dev/tickets/:id", requireAuth, wrap(async (req, res) => {
 const SIGNUPS_OPEN = process.env.SIGNUPS_OPEN === "1";
 const SIGNUPS_CLOSED_MSG = "NEON AI does not allow account creation until the Privacy Policy and Terms of Service are complete and allow for public usage.";
 const closedReply = (res) => res.status(403).json({ error: SIGNUPS_CLOSED_MSG, field: "closed" });
-// An approved email (the owner approved its support ticket) may sign up while sign-ups are closed. The approval is a one-time link emailed to
-// that address (a token; only its hash is stored). It works once, for that email only, and expires after 14 days.
-const APPROVAL_MS = 14 * 24 * 3600e3;
-// The approval email carries a short code (no clickable link: some mail systems hold back emails with links from new senders).
-const APPROVAL_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";                     // no 0/O/1/I to avoid mix-ups
-const newApprovalCode = () => { let c = ""; for (let i = 0; i < 10; i++) c += APPROVAL_CHARS[crypto.randomInt(APPROVAL_CHARS.length)]; return c.slice(0, 5) + "-" + c.slice(5); };
-const codeNorm = (x) => String(x || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-const approvalHash = (code) => sha("approval:" + codeNorm(code));
-async function approvalFor(token) {
-  const raw = String(token || "").trim(), cands = [];
-  if (raw.length >= 20) cands.push(sha(raw));                                     // an older long link token
-  if (codeNorm(raw).length === 10) cands.push(approvalHash(raw));
-  if (!cands.length) return null;
-  return (await q("select * from signup_approvals where token_hash = any($1) and status = 'approved' and expires_at > now()", [cands])).rows[0] || null;
+// An approved person (the owner approved their support ticket) may create ONE account while sign-ups are closed. The approval is a one-time
+// link emailed to them (a token; only its hash is stored). The first visit uses the link up (a second visit is a 404) and hands that browser an
+// approval cookie for 2 hours; the account (any email, or Google) then marks the approval used. The link expires after 14 days.
+const APPROVAL_MS = 14 * 24 * 3600e3, APPROVAL_SESSION_MS = 2 * 3600e3, APPROVAL_COOKIE = "neon_apv";
+async function approvalFor(req) {
+  const c = getCookie(req, APPROVAL_COOKIE); if (!c) return null;
+  return (await q("select * from signup_approvals where token_hash = $1 and status = 'opened' and expires_at > now()", [sha("opened:" + c)])).rows[0] || null;
 }
-const markApprovalUsed = (enorm) => q("update signup_approvals set status = 'used', used_at = now(), token_hash = null where email_norm = $1 and status = 'approved'", [enorm]).catch(() => {});
-const maskEmail2 = (e) => { const [l, d] = String(e).split("@"); return (l.length > 2 ? l.slice(0, 2) : l.slice(0, 1)) + "***@" + d; };
-app.post("/api/signup/approval", small, wrap(async (req, res) => {          // the page checks an approval link (to show the approved email)
-  if (limited("aprcheck:" + req.ip, 30, 3600e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
-  const ap = await approvalFor(req.body?.token);
-  if (!ap) return res.status(404).json({ error: "This approval link isn't valid any more. It may have expired or already been used." });
-  res.json({ email: ap.email });
+const markApprovalUsed = (enorm) => q("update signup_approvals set status = 'used', used_at = now(), token_hash = null where email_norm = $1 and status = 'opened'", [enorm]).catch(() => {});
+app.post("/api/signup/approval", small, wrap(async (req, res) => {          // does this browser hold a valid approval? (the page shows "You're approved")
+  if (limited("aprcheck:" + req.ip, 60, 3600e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
+  const ap = await approvalFor(req);
+  if (!ap) return res.status(404).json({ error: "No approval." });
+  res.json({ ok: true });
 }));
 app.post("/api/signup/start", small, wrap(async (req, res) => {
-  const ap = SIGNUPS_OPEN ? null : await approvalFor(req.body?.approval);
+  const ap = SIGNUPS_OPEN ? null : await approvalFor(req);
   if (!SIGNUPS_OPEN && !ap) return closedReply(res);
   if (limited("sstart:" + req.ip, 10, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
   const bad = checkSignupFields(req.body || {});
@@ -702,7 +707,6 @@ app.post("/api/signup/start", small, wrap(async (req, res) => {
   if (req.body?.agree !== true) return res.status(400).json({ error: "Please agree to the Terms and Privacy Policy to continue.", field: "agree" });
   if (!MAIL_READY) return res.status(503).json({ error: "Email sign-up isn't available yet. Try Continue with Google instead.", field: "email" });
   const { username, password } = req.body, em = req.body.email.trim().toLowerCase();
-  if (ap && normEmail(em) !== ap.email_norm) return res.status(403).json({ error: `This approval is for ${maskEmail2(ap.email)}. Use that email address.`, field: "email" });
   if (limited("smail:" + em, 5, 60 * 60e3)) return res.status(429).json({ error: "Too many codes sent to that email. Try again in an hour.", field: "email" });
   const { rows: dup } = await q("select username_lc = $1 as u, email_norm = $2 as e from users where username_lc = $1 or email_norm = $2", [username.toLowerCase(), normEmail(em)]);
   if (dup.some((r) => r.e)) return res.status(409).json({ error: "This email already has an account (email or Google). Please sign in instead.", field: "email" });
@@ -740,6 +744,8 @@ app.post("/api/signup/verify", small, wrap(async (req, res) => {
   if (limited("sverify:" + req.ip, 30, 60 * 60e3)) return res.status(429).json({ error: "Too many attempts. Try again later." });
   const em = String(req.body?.email || "").trim().toLowerCase(), code = String(req.body?.code || "").replace(/\D/g, "");
   if (code.length !== 6) return res.status(400).json({ error: "Enter the 6-digit code.", field: "code" });
+  const apv = SIGNUPS_OPEN ? null : await approvalFor(req);                                  // closed: the approval must still be unused
+  if (!SIGNUPS_OPEN && !apv) return closedReply(res);
   const { rows } = await q("select * from signup_pending where email = $1", [em]);
   const p = rows[0];
   if (!p || new Date(p.expires_at) < new Date()) return res.status(400).json({ error: "That code has expired. Tap Resend to get a new one.", field: "code", expired: true });
@@ -759,7 +765,7 @@ app.post("/api/signup/verify", small, wrap(async (req, res) => {
     throw e;
   }
   await q("delete from signup_pending where email = $1", [em]);
-  await markApprovalUsed(normEmail(em));
+  if (apv) { await markApprovalUsed(apv.email_norm); res.clearCookie(APPROVAL_COOKIE, { path: "/" }); }
   await startSession(req, res, user.id, !!req.body?.remember);
   res.json(await mePayload(user));
 }));
@@ -781,7 +787,7 @@ app.post("/api/auth/google/start", small, wrap(async (req, res) => {
   const { username, password, remember } = req.body || {};
   let name = null, hash = null, ap = null;
   if (username !== undefined || password !== undefined) {   // creating an account: they picked a username and password first
-    ap = SIGNUPS_OPEN ? null : await approvalFor(req.body?.approval);
+    ap = SIGNUPS_OPEN ? null : await approvalFor(req);
     if (!SIGNUPS_OPEN && !ap) return closedReply(res);
     const bad = checkSignupFields({ username, password, email: "x@x.xx" });
     if (bad) return res.status(400).json(bad);
@@ -833,9 +839,10 @@ app.get("/api/auth/google/callback", wrap(async (req, res) => {
   if (user) { if (pic && pic !== user.avatar) await q("update users set avatar = $1 where id = $2", [pic, user.id]); }
   else if (!pend.username) return authFail(res, "There's no NEON AI account for that Google account yet. Choose Create account first.");   // signing in never makes an account: that needs the sign-up form and the Terms
   else {
-    if (!SIGNUPS_OPEN) {                                                                     // sign-ups are closed: only the approved email may create an account
-      const apr = pend.approval_hash ? (await q("select * from signup_approvals where token_hash = $1 and status = 'approved' and expires_at > now()", [pend.approval_hash])).rows[0] : null;
-      if (!apr || apr.email_norm !== enorm) return authFail(res, "That Google account's email isn't the one we approved. Use the approved email address.");
+    let apr = null;
+    if (!SIGNUPS_OPEN) {                                                                     // sign-ups are closed: needs an unused approval (any Google account will do)
+      apr = pend.approval_hash ? (await q("select * from signup_approvals where token_hash = $1 and status = 'opened' and expires_at > now()", [pend.approval_hash])).rows[0] : null;
+      if (!apr) return authFail(res, "Your approval has expired or was already used. Ask for a new one.");
     }
     // new account: the username they typed in the sign-up form (if it's still free), otherwise one made from their email
     const base = usernameFromEmail(email);
@@ -856,7 +863,7 @@ app.get("/api/auth/google/callback", wrap(async (req, res) => {
       }
     }
     if (!user) return authFail(res, "Couldn't create your account. Please try again.");
-    if (created) await markApprovalUsed(enorm);
+    if (created && apr) { await markApprovalUsed(apr.email_norm); res.clearCookie(APPROVAL_COOKIE, { path: "/" }); }
   }
   await startSession(req, res, user.id, !!pend.remember);
   res.redirect(created ? "/?welcome=1" : "/");
