@@ -282,7 +282,8 @@ function showClosedNote(on, instant) {
 function dropApproval() { approval.ok = false; }
 async function checkApproval(announce) {
   try {
-    await api("/api/signup/approval", { method: "POST", noAuthRedirect: true, body: {} });
+    const d = await api("/api/signup/approval", { method: "POST", noAuthRedirect: true, body: {} });
+    if (!d || d.ok !== true) throw new Error("no approval");
     approval.ok = true; setMode("signup", true); if (announce) toast("You're approved! Create your account below.", "ok");
   } catch { approval.ok = false; }
 }
