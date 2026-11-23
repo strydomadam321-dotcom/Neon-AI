@@ -285,6 +285,7 @@ async function checkApproval(token) {
     const d = await api("/api/signup/approval", { method: "POST", noAuthRedirect: true, body: { token } });
     Object.assign(approval, { token, email: d.email, ok: true });
     $("approvedEmail").textContent = d.email; $("email").value = d.email; $("email").readOnly = true;
+    $("codeC").classList.remove("open"); $("codeInput").value = "";
     setMode("signup"); toast("You're approved! Create your account below.", "ok");
   } catch (e) { toast(e.message || "That approval link isn't valid.", "err"); }
 }
@@ -307,6 +308,13 @@ function setMode(m, instant) {
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => { if (t.dataset.mode !== mode) setMode(t.dataset.mode); }));
 
 $("closedBack").onclick = () => setMode("login");
+$("codeToggle").onclick = () => { const c = $("codeC"), open = c.classList.toggle("open"); if (open) setTimeout(() => $("codeInput").focus({ preventScroll: true }), 350); };
+const codeSubmit = async () => {
+  const v = $("codeInput").value.trim(); if (v.replace(/[^A-Za-z0-9]/g, "").length < 10) { toast("Type the 10-character code from the email.", "err"); return; }
+  const b = $("codeGo"); b.disabled = true; try { await checkApproval(v); } finally { b.disabled = false; }
+};
+$("codeGo").onclick = codeSubmit;
+$("codeInput").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); codeSubmit(); } };
 $("closedSupport").onclick = () => NeonSupport.open({ suggest: "account" });
 $("googleBtn").onclick = googleGo; $("googleBtn2").onclick = googleGo;
 addEventListener("pageshow", (e) => { if (e.persisted) googleBusy(false); });   // coming back from Google with the Back button
@@ -1657,6 +1665,7 @@ function showGfxInfo() {
     (rm ? "Your system asks apps to reduce motion; the effects are still shown. Use the switches here to calm them down." : "");
 }
 function openSettings() {
+  if (user && user.dev) NeonSupport.accountCount();                // the number of accounts in the Developer section
   fillSettings(); updateUnsaved(); showGfxInfo();
   $("settings").classList.remove("hidden");
   $("settings").querySelector(".set-body").scrollTop = 0;
@@ -1699,8 +1708,9 @@ function devTicketCount(c) {
   $("ticketsTop").title = u ? `Support tickets (${u} new)` : "Support tickets";
 }
 setInterval(() => { if (user && user.dev && document.visibilityState === "visible") api("/api/dev/tickets/count", { noAuthRedirect: true }).then(devTicketCount).catch(() => {}); }, 45000);
-NeonSupport.init({ api, toast, dialog, icon, onCount: devTicketCount });
+NeonSupport.init({ api, toast, dialog, icon, onCount: devTicketCount, onAccounts: (n) => { const c = $("devAccountsCount"); c.textContent = n; c.hidden = !n; } });
 $("ticketsTop").onclick = () => NeonSupport.openInbox();
+$("devAccounts").onclick = () => { closeSettings(true); setTimeout(() => NeonSupport.openAccounts(), 150); };
 $("devTickets").onclick = () => { closeSettings(true); setTimeout(() => NeonSupport.openInbox(), 150); };
 $("nukeBtn").onclick = async () => {
   if (!user?.dev) return;

@@ -141,7 +141,9 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
       <div id="closedC" hidden><div class="closed-note" role="status">
         <b>Account creation is closed</b>
         <p>NEON AI does not allow account creation until the Privacy Policy and Terms of Service are complete and allow for public usage.</p>
-        <p class="closed-hint">Already approved? Open the sign-up link in the email we sent you.</p>
+        <p class="closed-hint">Already approved? Use the approval code from the email we sent you.</p>
+        <button type="button" class="linkbtn" id="codeToggle">I have an approval code</button>
+        <div class="collapse" id="codeC"><div class="collapse-in"><div class="code-row" id="codeForm"><input id="codeInput" placeholder="XXXXX-XXXXX" maxlength="14" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Approval code"><button type="button" class="btn primary small" id="codeGo"><span class="lbl">Continue</span></button></div></div></div>
         <button type="button" class="linkbtn" id="closedBack">Back to sign in</button>
         <button type="button" class="btn small sup-cta" id="closedSupport"><svg class="ic"><use href="#i-mail"/></svg>Contact support</button>
       </div></div>
@@ -400,6 +402,10 @@ try { var L = JSON.parse(localStorage.getItem("neon-look") || "{}"), R = documen
         <div class="set-row">
           <div class="txt"><b>Nuke</b><span>Takes the whole NEON AI website offline for everyone, on every address, until Claude turns it back on</span></div>
           <button id="nukeBtn" class="btn danger"><svg class="ic"><use href="#i-alert"/></svg>Nuke</button>
+        </div>
+        <div class="set-row">
+          <div class="txt"><b>Accounts</b><span id="devAccountsTxt">Everyone who has an account, and how they signed up</span></div>
+          <button id="devAccounts" type="button" class="btn"><svg class="ic"><use href="#i-user"/></svg>View accounts<span class="cnt" id="devAccountsCount" hidden></span></button>
         </div>
         <div class="set-row">
           <div class="txt"><b>Support tickets</b><span>Messages people send with the "Contact support" button</span></div>

@@ -130,10 +130,10 @@
       <h4>${esc(cur.subject)}</h4><p class="inb-from">${esc(cur.name || "No name")} &lt;<a href="mailto:${esc(cur.email)}">${esc(cur.email)}</a>&gt; · ${esc(new Date(cur.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }))}</p>
       <div class="inb-msg">${esc(cur.message)}</div>
       ${data.mail ? "" : `<p class="inb-warn">Email isn't set up on the server yet (RESEND_API_KEY), so replies and approvals can't be sent.</p>`}
-      ${(cur.thread || []).length ? `<div class="inb-thread">${cur.thread.map((m) => `<div class="inb-sent ${esc(m.kind)}"><b>${m.kind === "reply" ? "You replied" : m.kind === "approved" ? "Approved" : "Declined"} · ${esc(new Date(m.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }))}${m.by ? " · " + esc(m.by) : ""}</b><p>${esc(m.body)}</p></div>`).join("")}</div>` : ""}
+      ${(cur.thread || []).length ? `<div class="inb-thread">${cur.thread.map((m) => `<div class="inb-sent ${esc(m.kind)}"><b>${m.kind === "reply" ? "You replied" : m.kind === "approved" ? "Approved" : "Declined"} · ${esc(new Date(m.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }))}${m.by ? " · " + esc(m.by) : ""}</b><p>${m.kind === "reply" ? "“" + esc(m.body) + "”" : esc(m.body)}</p></div>`).join("")}</div>` : ""}
       ${acctRow(cur)}
       <div class="inb-compose" id="inbCompose"${composing.has(cur.id) ? "" : " hidden"}><textarea id="inbDraft" maxlength="4000" placeholder="Write your reply. NEON AI emails it to ${esc(cur.email)}.">${esc(drafts.get(cur.id) || "")}</textarea>
-        <div class="row"><small>Sent from the NEON AI address, with the ticket number in the subject.</small><span><button type="button" class="btn small" id="inbCancel">Cancel</button> <button type="button" class="btn primary small" id="inbSend">${H.icon("mail")}<span>Send reply</span></button></span></div></div>
+        <div class="row"><button type="button" class="btn small ai" id="inbAI">${H.icon("bolt")}<span>Write with AI</span></button><span class="acts2"><button type="button" class="btn small" id="inbCancel">Cancel</button><button type="button" class="btn primary small" id="inbSend">${H.icon("mail")}<span>Send reply</span></button></span></div><small class="hint2">Sent from the NEON AI address with the ticket number in the subject. The AI only types a draft into the box: you read it, change it and press Send.</small></div>
       <div class="inb-btns"><button type="button" class="btn primary small" id="inbReply">${H.icon("mail")}<span>Reply</span></button>
         <button type="button" class="btn small" id="inbToggle">${cur.status === "open" ? "Mark resolved" : "Reopen"}</button><button type="button" class="btn small danger" id="inbDel">${H.icon("trash")}<span>Delete</span></button></div>`
       : `<div class="inb-none">Select a ticket to read it</div>`;
@@ -146,6 +146,7 @@
       $("#inbCancel").onclick = () => { composing.delete(cur.id); comp.hidden = true; };
       draft.oninput = () => drafts.set(cur.id, draft.value);
       $("#inbSend").onclick = () => sendReply(cur, draft.value, $("#inbSend"));
+      $("#inbAI").onclick = () => aiDraft(cur, draft, $("#inbAI"));
       const ap = $("#inbApprove"), dc = $("#inbDecline"); if (ap) ap.onclick = () => approve(cur, ap); if (dc) dc.onclick = () => decline(cur, dc);
     }
   }
@@ -153,18 +154,28 @@
   function acctRow(t) {
     if (t.registered) return `<div class="inb-acct"><span class="st"><b>This email already has an account.</b> Nothing to approve.</span></div>`;
     const a = t.approval, when = a ? new Date(a.at).toLocaleDateString([], { day: "numeric", month: "short" }) : "";
-    const st = !a ? "This email has <b>no account</b> yet and sign-ups are closed." : a.status === "approved" ? `<b>Approved</b> on ${esc(when)}. A sign-up link was emailed; it works once.` : a.status === "expired" ? `<b>Approved</b> on ${esc(when)}, but the link has <b>expired</b>.` : a.status === "declined" ? `<b>Declined</b> on ${esc(when)}.` : `Account <b>created</b> from the approval.`;
+    const st = !a ? "This email has <b>no account</b> yet and sign-ups are closed." : a.status === "approved" ? `<b>Approved</b> on ${esc(when)}. An approval code was emailed; it works once.` : a.status === "expired" ? `<b>Approved</b> on ${esc(when)}, but the code has <b>expired</b>.` : a.status === "declined" ? `<b>Declined</b> on ${esc(when)}.` : `Account <b>created</b> from the approval.`;
     if (a && a.status === "used") return `<div class="inb-acct"><span class="st">${st}</span></div>`;
-    return `<div class="inb-acct"><span class="st">${st}</span><button type="button" class="btn good small" id="inbApprove">${H.icon("check")}<span>${a && (a.status === "approved" || a.status === "expired") ? "Send a new link" : "Approve account"}</span></button>${a && a.status === "declined" ? "" : `<button type="button" class="btn danger small" id="inbDecline">${H.icon("x")}<span>Decline</span></button>`}</div>`;
+    return `<div class="inb-acct"><span class="st">${st}</span><button type="button" class="btn good small" id="inbApprove">${H.icon("check")}<span>${a && (a.status === "approved" || a.status === "expired") ? "Send a new code" : "Approve account"}</span></button>${a && a.status === "declined" ? "" : `<button type="button" class="btn danger small" id="inbDecline">${H.icon("x")}<span>Decline</span></button>`}</div>`;
   }
   async function busy(btn, fn) { const html = btn.innerHTML; btn.disabled = true; btn.innerHTML = "<span>Sending...</span>"; try { return await fn(); } finally { btn.disabled = false; btn.innerHTML = html; } }
   async function sendReply(t, text, btn) {
     text = text.trim(); if (text.length < 2) { H.toast("Write a message first.", "err"); return; }
     try { await busy(btn, () => H.api(`/api/dev/tickets/${t.id}/reply`, { method: "POST", body: { message: text } })); drafts.delete(t.id); composing.delete(t.id); H.toast("Reply emailed to " + t.email + "."); await load(true); } catch (e) { H.toast(e.message, "err"); }
   }
+  // Gemini writes a reply to the ticket and types it into the box (never sends it)
+  async function aiDraft(t, box, btn) {
+    if (box.value.trim().length > 20 && !(await H.dialog({ title: "Replace what you wrote?", message: "The AI draft will replace the text in the box.", ok: "Replace" }))) return;
+    const html = btn.innerHTML; btn.disabled = true; btn.innerHTML = "<span>Writing...</span>"; box.classList.add("writing");
+    try {
+      const d = await H.api(`/api/dev/tickets/${t.id}/draft`, { method: "POST", body: {} });
+      box.value = d.text; drafts.set(t.id, d.text); box.focus(); box.setSelectionRange(0, 0); H.toast("Draft written. Read it, edit it, then send.");
+    } catch (e) { H.toast(e.message, "err"); }
+    finally { btn.disabled = false; btn.innerHTML = html; box.classList.remove("writing"); }
+  }
   async function approve(t, btn) {
-    if (!(await H.dialog({ title: "Approve this account?", message: `${t.email} will get an email from NEON AI with a one-time link to create an account, even though sign-ups are closed. The ticket will be marked resolved.`, ok: "Approve and email" }))) return;
-    try { await busy(btn, () => H.api(`/api/dev/tickets/${t.id}/approve`, { method: "POST", body: {} })); H.toast("Approved. The sign-up link was emailed to " + t.email + "."); follow = t.id; await load(true); } catch (e) { H.toast(e.message, "err"); }
+    if (!(await H.dialog({ title: "Approve this account?", message: `${t.email} will get an email from NEON AI with a one-time approval code to create an account, even though sign-ups are closed. The ticket will be marked resolved.`, ok: "Approve and email" }))) return;
+    try { await busy(btn, () => H.api(`/api/dev/tickets/${t.id}/approve`, { method: "POST", body: {} })); H.toast("Approved. The approval code was emailed to " + t.email + "."); follow = t.id; await load(true); } catch (e) { H.toast(e.message, "err"); }
   }
   async function decline(t, btn) {
     const reason = await H.dialog({ title: "Decline this account?", message: `${t.email} will get an email saying we can't create an account right now. You can add a reason (they will see it), or leave it empty.`, input: "", placeholder: "Optional reason", ok: "Decline and email", danger: true });
@@ -197,5 +208,27 @@
     else if (box && !box.classList.contains("hidden") && !box.classList.contains("out")) { e.stopImmediatePropagation(); close(); }
   }, true);
 
-  window.NeonSupport = { init(h) { H = h; }, open, openInbox, refreshCount: async () => { try { const d = await H.api("/api/dev/tickets"); H.onCount && H.onCount(d.counts); return d.counts; } catch { return null; } } };
+  // ---------- all accounts (dev accounts only) ----------
+  let acc = null, accData = null;
+  async function accountCount() { try { const d = await H.api("/api/dev/accounts"); accData = d; H.onAccounts && H.onAccounts(d.count); const t = document.getElementById("devAccountsTxt"); if (t) t.textContent = `${d.count} account${d.count === 1 ? "" : "s"} in the system: ${d.email} email, ${d.google} Google`; return d; } catch { return null; } }
+  function paintAccounts() {
+    const q = (acc.querySelector("#accSearch").value || "").trim().toLowerCase(), list = (accData ? accData.accounts : []).filter((u) => !q || u.username.toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q));
+    acc.querySelector("#accSub").textContent = accData ? `${accData.count} account${accData.count === 1 ? "" : "s"}: ${accData.email} with email, ${accData.google} with Google` : "Loading...";
+    acc.querySelector("#accList").innerHTML = list.length ? list.map((u, i) => `<div class="acc-row" style="--i:${Math.min(i, 10)}"><span class="av">${esc(u.username[0] || "?")}</span><span class="mid"><b>${esc(u.username)}</b><small>${u.email ? esc(u.email) : "No email"}${u.email && !u.verified ? " (not verified)" : ""}</small></span><span class="chip ${u.method.startsWith("Google") ? "g" : ""}">${esc(u.method)}</span><span class="chip">${esc(u.plan)}</span><time>${esc(new Date(u.at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }))}</time></div>`).join("") : `<p class="inb-empty">${accData ? "No accounts match." : "Loading..."}</p>`;
+  }
+  async function openAccounts() {
+    if (!acc) {
+      acc = document.createElement("div"); acc.id = "accounts"; acc.className = "overlay hidden";
+      acc.innerHTML = `<div class="card acc-card" role="dialog" aria-modal="true" aria-label="Accounts"><div class="inb-head"><div><h3>Accounts</h3><p class="sup-sub" id="accSub"></p></div><div class="inb-acts"><button type="button" class="icon" id="accX" aria-label="Close">${H.icon("x")}</button></div></div><input id="accSearch" class="acc-search" placeholder="Search by username or email" autocomplete="off"><div class="acc-list" id="accList"></div></div>`;
+      document.body.appendChild(acc);
+      const closeAcc = () => { acc.classList.add("out"); setTimeout(() => { acc.classList.add("hidden"); acc.classList.remove("out"); }, 240); };
+      acc.querySelector("#accX").onclick = closeAcc; acc.onmousedown = (e) => { if (e.target === acc) closeAcc(); };
+      acc.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); closeAcc(); } });
+      acc.querySelector("#accSearch").oninput = paintAccounts;
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape" && acc && !acc.classList.contains("hidden") && !acc.classList.contains("out")) { const dlg = document.getElementById("dialog"); if (dlg && !dlg.classList.contains("hidden")) return; e.stopImmediatePropagation(); closeAcc(); } }, true);
+    }
+    acc.classList.remove("hidden", "out"); accData = null; paintAccounts(); await accountCount(); paintAccounts(); acc.querySelector("#accSearch").focus({ preventScroll: true });
+  }
+
+  window.NeonSupport = { openAccounts, accountCount, init(h) { H = h; }, open, openInbox, refreshCount: async () => { try { const d = await H.api("/api/dev/tickets"); H.onCount && H.onCount(d.counts); return d.counts; } catch { return null; } } };
 })();
