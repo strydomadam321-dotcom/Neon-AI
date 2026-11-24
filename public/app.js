@@ -516,8 +516,23 @@ function closeWhatsNew() {
   if (!wnShowing) return; wnShowing = false;
   try { ls.set(wnKey("seen"), config.version); if ($("wnNever").checked) ls.set(wnKey("nolog"), "1"); else localStorage.removeItem(wnKey("nolog")); } catch {}
   const o = $("whatsnew"); o.classList.add("out"); setTimeout(() => { if (!wnShowing) o.classList.add("hidden"); o.classList.remove("out"); }, 260);
+  setTimeout(() => maybePromo(), 900);
 }
-function maybeWhatsNew() { if (!user || !config.version || ls.get(wnKey("nolog")) || ls.get(wnKey("seen")) === config.version) return; setTimeout(() => openWhatsNew(false), 700); }
+function maybeWhatsNew() { if (!user || !config.version || !(config.changelog || []).length || ls.get(wnKey("nolog")) || ls.get(wnKey("seen")) === config.version) { setTimeout(() => maybePromo(), 1200); return; } setTimeout(() => openWhatsNew(false), 700); }
+// ---------- "try my new website": shows on 3 separate visits (the first time they see it, then two more visits), with no way to switch it off ----------
+const PROMO_MAX = 3; let promoShowing = false;
+const promoKey = () => "neon-promo-" + (user?.username || "");
+function maybePromo() {
+  if (!user || promoShowing || gatePlans || wnShowing) return;
+  let n = 0; try { n = Number(localStorage.getItem(promoKey())) || 0; if (n >= PROMO_MAX || sessionStorage.getItem(promoKey())) return; } catch { return; }
+  if ((config.changelog || []).length && config.version && !ls.get(wnKey("nolog")) && ls.get(wnKey("seen")) !== config.version) return;      // the update log goes first; it calls this again when closed
+  try { localStorage.setItem(promoKey(), String(n + 1)); sessionStorage.setItem(promoKey(), "1"); } catch {}
+  promoShowing = true; const o = $("promo"); o.classList.remove("hidden", "out");
+}
+function closePromo() { if (!promoShowing) return; promoShowing = false; const o = $("promo"); o.classList.add("out"); setTimeout(() => { if (!promoShowing) o.classList.add("hidden"); o.classList.remove("out"); }, 260); }
+$("promoX").onclick = closePromo; $("promoLater").onclick = closePromo; $("promoGo").onclick = () => setTimeout(closePromo, 150);
+$("promo").onmousedown = (e) => { if (e.target === $("promo")) closePromo(); };
+addEventListener("keydown", (e) => { if (e.key === "Escape" && promoShowing) { e.stopImmediatePropagation(); closePromo(); } }, true);
 $("wnOk").onclick = closeWhatsNew; $("wnX").onclick = closeWhatsNew;
 $("whatsnew").onmousedown = (e) => { if (e.target === $("whatsnew")) closeWhatsNew(); };
 $("wnOpen").onclick = () => { closeSettings(true); setTimeout(() => openWhatsNew(true), 200); };
@@ -990,6 +1005,12 @@ function msgEl(m, idx, chat = current) {
     row.append(av, body);
     return row;
   }
+  if (m.video) {                                            // a /videos library: the card is the whole message
+    row.classList.add("chessmsg", "videomsg");
+    body.appendChild(NeonVideos.card(m, { icon, api, toast, save: () => saveChessSoon(chat) }));
+    row.append(av, body);
+    return row;
+  }
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   if (m.role === "user") {
@@ -1217,7 +1238,17 @@ function startLarp() {
   ls.set("neon-last-" + user.username, chat.id);
   persist(chat);
 }
-const slashEl = $("slashHint"), SLASH_CMDS = ["/chess", "/larp"];
+function startVideos() {
+  const chat = current; if (!chat) return;
+  chat.messages.push({ role: "assistant", text: "", video: NeonVideos.defaults() });
+  if (chat.messages.length === 1) chat.title = "Videos";
+  chat.model = els.model.value;
+  els.input.value = ""; autoGrow(); hideSlash();
+  renderMessages(); scrollDown(true);
+  ls.set("neon-last-" + user.username, chat.id);
+  persist(chat);
+}
+const slashEl = $("slashHint"), SLASH_CMDS = ["/chess", "/larp", "/videos"];
 function showSlash() {
   const v = els.input.value.trim().toLowerCase(), on = v.startsWith("/") && !v.includes(" ") && SLASH_CMDS.some((c) => c.startsWith(v));
   if (on) slashEl.querySelectorAll("button").forEach((b) => (b.hidden = !b.dataset.cmd.startsWith(v)));
@@ -1225,13 +1256,14 @@ function showSlash() {
   else if (!on && !slashEl.hidden) hideSlash();
 }
 function hideSlash() { if (slashEl.hidden) return; slashEl.classList.add("out"); setTimeout(() => { slashEl.hidden = true; slashEl.classList.remove("out"); }, 200); }
-slashEl.querySelectorAll("button").forEach((b) => (b.onclick = () => { if (b.dataset.cmd === "/larp") startLarp(); else startChess(""); els.input.focus(); }));
+slashEl.querySelectorAll("button").forEach((b) => (b.onclick = () => { if (b.dataset.cmd === "/larp") startLarp(); else if (b.dataset.cmd === "/videos") startVideos(); else startChess(""); els.input.focus(); }));
 
 async function sendMessage(textOverride) {
   if (busy) { abortCtl?.abort(); return; }
   let text = (textOverride ?? els.input.value).trim();
   if (/^\/c[a-z]*(\s|$)/i.test(text) && "/chess".startsWith(text.split(/\s/)[0].toLowerCase()) && !pending.length) { startChess(text.slice(text.split(/\s/)[0].length)); return; }   // "/chess", "/chess 1200", "/ch"
   if (/^\/l[a-z]*(\s|$)/i.test(text) && "/larp".startsWith(text.split(/\s/)[0].toLowerCase()) && !pending.length) { startLarp(); return; }   // "/larp", "/l"
+  if (/^\/v[a-z]*(\s|$)/i.test(text) && "/videos".startsWith(text.split(/\s/)[0].toLowerCase()) && !pending.length) { startVideos(); return; }   // "/videos", "/v"
   if (!text && !pending.length) return;
   if (config.hasKey === false) toast("The server has no Anthropic API key yet.", "err");
   const chat = current;

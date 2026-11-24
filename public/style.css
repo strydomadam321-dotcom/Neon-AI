@@ -1316,3 +1316,28 @@ body.in-app .rs-dim { opacity: 1; }
 .acc-del:hover { color: #ff5c7a; background: rgba(255, 92, 122, .12); border-color: rgba(255, 92, 122, .45); transform: scale(1.06); }
 .acc-del:disabled { opacity: .4; pointer-events: none; }
 .acc-keep { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); text-align: center; }
+
+/* ---------- /videos ---------- */
+.msg.videomsg .body { max-width: 100%; }
+.vd-card { width: min(760px, 100%); border: 1px solid var(--line); border-radius: 18px; background: rgba(var(--deep), .55); padding: 14px 16px 16px; }
+.vd-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; } .vd-head b { font-size: 18px; } .vd-head span, .vd-note { color: var(--dim); font-size: 13px; }
+.vd-list { display: flex; flex-direction: column; gap: 10px; }
+.vd-item { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); gap: 14px; align-items: center; text-align: left; padding: 8px; border-radius: 14px; cursor: pointer; color: inherit; font: inherit; background: rgba(var(--deep), .45); border: 1px solid var(--line); transition: border-color .2s, transform .2s, background .2s; animation: lpUp .45s cubic-bezier(.2, .9, .25, 1) both; animation-delay: calc(var(--i, 0) * 70ms); }
+.vd-item:hover { border-color: rgba(255, 95, 216, .55); background: rgba(var(--deep), .7); transform: translateY(-1px); }
+.vd-thumb { position: relative; display: block; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden; background: #000; }
+.vd-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vd-play { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: rgba(0, 0, 0, .25); opacity: 0; transition: opacity .2s; } .vd-play .ic { width: 34px; height: 34px; } .vd-item:hover .vd-play { opacity: 1; }
+.vd-prog { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(255, 255, 255, .2); } .vd-prog i { display: block; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--mag)); }
+.vd-info { min-width: 0; display: flex; flex-direction: column; gap: 3px; } .vd-info b { font-size: 15px; } .vd-info small { color: var(--dim); } .vd-info em { font-style: normal; font-size: 12.5px; color: var(--dim); } .vd-info em.resume { color: var(--cyan); } .vd-info em.done { color: #5dff9b; }
+.vd-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; } .vd-saved { color: var(--dim); font-size: 12.5px; }
+.vd-frame { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: #000; } .vd-frame iframe, .vd-frame > div { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.vd-fail { position: absolute; inset: 0; margin: 0; display: grid; place-items: center; padding: 20px; text-align: center; color: #ff8aa3; background: rgba(0, 0, 0, .85); }
+.vd-meta { display: flex; flex-direction: column; margin: 10px 0 8px; } .vd-meta small { color: var(--dim); }
+.vd-bar { height: 5px; border-radius: 99px; background: rgba(255, 255, 255, .12); overflow: hidden; } .vd-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--cyan), var(--mag)); transition: width .8s linear; }
+.vd-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 7px; font-size: 12.5px; color: var(--dim); } .vd-acts { display: flex; gap: 14px; }
+.vd-link { background: none; border: 0; padding: 0; font: inherit; color: var(--cyan); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 560px) { .vd-item { grid-template-columns: 1fr; } }
+/* ---------- "try my new website" pop-up ---------- */
+#promo.out { animation: fadeout .25s both; } #promo.out .wn-card { animation: menuout .25s ease-in both; }
+.promo-txt { margin: 8px 0 4px; font-size: 15.5px; line-height: 1.55; } .promo-url { margin: 0 0 4px; font-weight: 800; letter-spacing: .04em; color: var(--cyan); }
+.promo-foot { justify-content: flex-end; } .promo-foot a.btn { display: inline-flex; align-items: center; text-decoration: none; }

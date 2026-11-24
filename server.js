@@ -94,7 +94,7 @@ If the content itself contains code fences, open and close the outer block with 
 // Update log shown to users once per new version (see changelog.json; newest entry first).
 const CHANGELOG = (() => { try { const j = JSON.parse(fs.readFileSync(path.join(__dirname, "changelog.json"), "utf8")); return Array.isArray(j) ? j : []; } catch { return []; } })();
 // Bump LEGAL_VERSION whenever the wording changes. CONTACT_EMAIL (environment) is where people can send privacy requests.
-const LEGAL_VERSION = "2026-11-24.1", LEGAL_UPDATED = "24 November 2026";
+const LEGAL_VERSION = "2026-11-24.2", LEGAL_UPDATED = "24 November 2026";
 const CONTACT_EMAIL = (process.env.CONTACT_EMAIL || "").trim();
 const readLegal = (n) => { try { return fs.readFileSync(path.join(__dirname, "legal", n + ".html"), "utf8"); } catch { return "<p>This document is not available right now.</p>"; } };
 const LEGAL = { terms: readLegal("terms"), privacy: readLegal("privacy") };
@@ -254,6 +254,18 @@ create table if not exists ticket_replies(
   sent_at timestamptz not null default now()
 );
 alter table google_pending add column if not exists approval_hash text;
+create table if not exists video_progress(
+  user_id int not null references users(id) on delete cascade,
+  video_id text not null,
+  pos real not null default 0,
+  dur real not null default 0,
+  rate real not null default 1,
+  vol int not null default 100,
+  muted boolean not null default false,
+  done boolean not null default false,
+  updated_at timestamptz not null default now(),
+  primary key(user_id, video_id)
+);
 create table if not exists meta(key text primary key, done_at timestamptz not null default now());
 `);
 // one-time reset requested by the owner: removes every account, chat and session, once
@@ -1070,6 +1082,25 @@ app.post("/api/account/delete", requireAuth, small, wrap(async (req, res) => {
   await q("delete from users where id = $1", [req.user.id]);
   res.clearCookie(COOKIE, { path: "/" });
   console.log("account deleted:", req.user.username);
+  res.json({ ok: true });
+}));
+
+// ---------- /videos: a small library of YouTube videos; each account's place (time, speed, volume) is saved so it resumes anywhere ----------
+const VIDEOS = [
+  { id: "AITUq3aW_8w", title: "GTA 6 | FULL GAME | PART 1", by: "CaseOh" },
+];
+app.get("/api/videos", requireAuth, wrap(async (req, res) => {
+  const rows = (await q("select video_id, pos, dur, rate, vol, muted, done, updated_at from video_progress where user_id = $1", [req.user.id])).rows, by = new Map(rows.map((r) => [r.video_id, r]));
+  res.json({ videos: VIDEOS.map((v) => { const r = by.get(v.id); return { ...v, pos: r ? r.pos : 0, dur: r ? r.dur : 0, rate: r ? r.rate : 1, vol: r ? r.vol : 100, muted: r ? r.muted : false, done: r ? r.done : false, at: r ? new Date(r.updated_at).getTime() : 0 }; }) });
+}));
+app.post("/api/videos/progress", requireAuth, small, wrap(async (req, res) => {
+  if (limited("vidprog:" + req.user.id, 2000, 3600e3)) return res.status(429).json({ error: "Slow down." });
+  const b = req.body || {}, v = VIDEOS.find((x) => x.id === b.id); if (!v) return res.status(404).json({ error: "Unknown video." });
+  const num = (x, lo, hi, d) => { x = Number(x); return Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : d; };
+  const dur = num(b.dur, 0, 86400 * 2, 0), pos = num(b.pos, 0, dur || 86400 * 2, 0), rate = num(b.rate, 0.25, 4, 1), vol = Math.round(num(b.vol, 0, 100, 100));
+  await q(`insert into video_progress(user_id, video_id, pos, dur, rate, vol, muted, done, updated_at) values($1,$2,$3,$4,$5,$6,$7,$8,now())
+           on conflict (user_id, video_id) do update set pos = $3, dur = $4, rate = $5, vol = $6, muted = $7, done = $8, updated_at = now()`,
+    [req.user.id, v.id, pos, dur, rate, vol, !!b.muted, !!b.done]);
   res.json({ ok: true });
 }));
 

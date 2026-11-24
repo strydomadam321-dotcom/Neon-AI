@@ -93,3 +93,10 @@
 - "Write with AI" in the reply composer: `POST /api/dev/tickets/:id/draft` (Gemini, 30/h, ticket text treated as untrusted) only fills the textarea; nothing is sent. The privacy policy mentions it.
 - Settings > Developer > Accounts: `GET /api/dev/accounts` (count, email vs Google, list with search, `NeonSupport.openAccounts`).
 - Accounts menu: each normal account has a trash button (not yours, not dev accounts: marked You/Dev). It opens a warning dialog (permanent, chats lost, Stripe plan NOT cancelled, type the username) and calls `DELETE /api/dev/accounts/:id` with `{confirm: username}` (dev only, 30/h, cascades chats/sessions; tickets stay). The row collapses with the springy morph.
+
+## /videos (watch videos, resume where you stopped)
+- Typing `/videos` (or `/v`) adds an assistant message with `m.video = {view:"list"|"play", id}`; `public/videos.js` (`NeonVideos.card`) renders the library (thumbnail, progress bar, "Resume at 13:05") and a YouTube iframe-API player (youtube-nocookie, normal controls). Going back into a chat with `view:"play"` reopens that video at the saved time (cued, not auto-played; clicking a video from the list autoplays).
+- The library is `VIDEOS` in `server.js` (id, title, channel); add a video by adding a line. Progress lives on the account in table `video_progress(user_id, video_id, pos, dur, rate, vol, muted, done)`: `GET /api/videos`, `POST /api/videos/progress` (saved every 5 s while playing, on pause/end, when the tab is hidden and on `pagehide` via a keepalive fetch, and when the card is re-drawn: the 1 s timer notices `!el.isConnected`). The page keeps a copy (`lib`) that every save updates at once, so a re-drawn card never reads stale data. Finished videos restart at 0. Privacy policy has a "Videos" item.
+
+## "Try my new website" pop-up
+- `maybePromo()` in `public/app.js` shows `#promo` (Strudel Clicker at socialcredit.info) on exactly 3 separate visits per account per browser: counter in localStorage `neon-promo-<username>` (max 3), once per browser session (sessionStorage), after the update log if one is due. No "don't show again" on purpose; it has Maybe later / X / Esc / backdrop to close.
