@@ -1341,3 +1341,12 @@ body.in-app .rs-dim { opacity: 1; }
 #promo.out { animation: fadeout .25s both; } #promo.out .wn-card { animation: menuout .25s ease-in both; }
 .promo-txt { margin: 8px 0 4px; font-size: 15.5px; line-height: 1.55; } .promo-url { margin: 0 0 4px; font-weight: 800; letter-spacing: .04em; color: var(--cyan); }
 .promo-foot { justify-content: flex-end; } .promo-foot a.btn { display: inline-flex; align-items: center; text-decoration: none; }
+
+/* ---------- Strudel Clicker button (left of the model picker) ---------- */
+.sc-btn { position: relative; flex: none; display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px 0 11px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 13.5px; color: #fff; cursor: pointer; background: linear-gradient(120deg, rgba(255, 95, 216, .9), rgba(139, 92, 246, .9)); border: 1px solid rgba(255, 255, 255, .28); box-shadow: 0 0 18px rgba(255, 95, 216, .35), inset 0 1px 0 rgba(255, 255, 255, .25); transition: transform .25s cubic-bezier(.3, 1.25, .4, 1), box-shadow .25s, filter .25s; }
+.sc-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 26px rgba(255, 95, 216, .55), inset 0 1px 0 rgba(255, 255, 255, .3); filter: brightness(1.08); }
+.sc-btn:active { transform: translateY(0) scale(.97); box-shadow: 0 0 10px rgba(255, 95, 216, .4); }
+.sc-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.sc-btn .ic { width: 18px; height: 18px; }
+.sc-new { font-size: 9.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; padding: 2px 6px; border-radius: 99px; color: #0b0220; background: #fff; }
+@media (max-width: 900px) { .sc-txt, .sc-new { display: none; } .sc-btn { width: 38px; padding: 0; justify-content: center; } }

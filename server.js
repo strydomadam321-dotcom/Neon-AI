@@ -502,8 +502,18 @@ const small = express.json({ limit: "20kb" });
 const big = express.json({ limit: "45mb" });
 
 // ---------- auth ----------
+// Strudel Clicker (a separate site from the NEON AI team). The button and pop-up use the nice subdomain once it answers, and the onrender.com address until then
+// (checked every 5 minutes, so nobody has to flip a setting after the DNS record is added). STRUDEL_URL forces a specific address.
+const STRUDEL_HOME = "https://strudel-clicker.freestudyresources.org/", STRUDEL_FALLBACK = "https://strudel-clicker.onrender.com/";
+let strudelUrl = process.env.STRUDEL_URL || STRUDEL_FALLBACK;
+async function checkStrudel() {
+  if (process.env.STRUDEL_URL) return;
+  try { const r = await fetch(STRUDEL_HOME, { redirect: "follow", signal: AbortSignal.timeout(6000) }); try { await r.body?.cancel(); } catch {} strudelUrl = r.ok ? STRUDEL_HOME : STRUDEL_FALLBACK; }
+  catch { strudelUrl = STRUDEL_FALLBACK; }
+}
+checkStrudel(); setInterval(checkStrudel, 5 * 60e3).unref();
 app.get("/api/config", (req, res) => {
-  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: !!STRIPE_KEY && STRIPE_LIVE, hasKey: !!process.env.ANTHROPIC_API_KEY, signupsOpen: SIGNUPS_OPEN, hasGemini: !!GEMINI_KEY, hasGoogle: !!(GOOGLE_ID && GOOGLE_SECRET), mailReady: MAIL_READY, legalVersion: LEGAL_VERSION, version: CHANGELOG[0]?.version || "1", changelog: CHANGELOG.slice(0, 6), defaultEffort: DEFAULT_EFFORT });
+  res.json({ models: MODELS, defaultModel: DEFAULT_MODEL, plans: PLANS, freeTokens: FREE_GEMINI_TOKENS_PER_DAY, plusClaudeMsgs: PLUS_CLAUDE_MSGS_PER_DAY, paymentsLive: !!STRIPE_KEY && STRIPE_LIVE, hasKey: !!process.env.ANTHROPIC_API_KEY, signupsOpen: SIGNUPS_OPEN, hasGemini: !!GEMINI_KEY, hasGoogle: !!(GOOGLE_ID && GOOGLE_SECRET), mailReady: MAIL_READY, legalVersion: LEGAL_VERSION, version: CHANGELOG[0]?.version || "1", changelog: CHANGELOG.slice(0, 6), defaultEffort: DEFAULT_EFFORT, strudelUrl });
 });
 
 const USER_RE = /^[A-Za-z0-9_.-]{3,24}$/;

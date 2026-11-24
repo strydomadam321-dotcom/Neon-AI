@@ -1,5 +1,17 @@
 [
   {
+    "version": "2.5",
+    "date": "24 November 2026",
+    "title": "NEON AI V2.5",
+    "tag": "Update",
+    "items": [
+      {
+        "icon": "🎮",
+        "text": "<b>Strudel Clicker is here.</b> Our new free game now has its own button at the top of NEON AI, next to the model picker. One click takes you straight to it."
+      }
+    ]
+  },
+  {
     "version": "2.4",
     "date": "24 November 2026",
     "title": "NEON AI V2.4",
@@ -8,10 +20,6 @@
       {
         "icon": "🎬",
         "text": "<b>New /videos command.</b> Type <b>/videos</b> to watch videos right inside NEON AI. It remembers exactly where you stopped (plus your speed and volume), so you can close the tab, come back later, and carry on from the same second. It works from a new <b>/videos</b> or by going back into that chat."
-      },
-      {
-        "icon": "🍥",
-        "text": "<b>New website.</b> Try Strudel Clicker at <b>socialcredit.info</b>."
       }
     ]
   },

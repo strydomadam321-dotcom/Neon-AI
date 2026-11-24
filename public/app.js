@@ -520,10 +520,16 @@ function closeWhatsNew() {
 }
 function maybeWhatsNew() { if (!user || !config.version || !(config.changelog || []).length || ls.get(wnKey("nolog")) || ls.get(wnKey("seen")) === config.version) { setTimeout(() => maybePromo(), 1200); return; } setTimeout(() => openWhatsNew(false), 700); }
 // ---------- "try my new website": shows on 3 separate visits (the first time they see it, then two more visits), with no way to switch it off ----------
+function applyStrudel() {       // the server decides which address to use (the subdomain once it works)
+  const u = config.strudelUrl; if (!u) return;
+  $("strudelBtn").href = u; $("promoGo").href = u;
+  try { $("promoUrl").textContent = new URL(u).host; } catch {}
+}
 const PROMO_MAX = 3; let promoShowing = false;
 const promoKey = () => "neon-promo-" + (user?.username || "");
 function maybePromo() {
   if (!user || promoShowing || gatePlans || wnShowing) return;
+  applyStrudel();
   let n = 0; try { n = Number(localStorage.getItem(promoKey())) || 0; if (n >= PROMO_MAX || sessionStorage.getItem(promoKey())) return; } catch { return; }
   if ((config.changelog || []).length && config.version && !ls.get(wnKey("nolog")) && ls.get(wnKey("seen")) !== config.version) return;      // the update log goes first; it calls this again when closed
   try { localStorage.setItem(promoKey(), String(n + 1)); sessionStorage.setItem(promoKey(), "1"); } catch {}
@@ -1851,6 +1857,7 @@ async function enterApp(data) {
   const qs = new URLSearchParams(location.search), authErr = qs.get("auth_error"), welcome = qs.has("welcome"), billing = qs.get("billing"), signupTok = qs.get("signup");
   if (authErr || welcome || billing || signupTok) history.replaceState(null, "", location.pathname);
   try { config = await (await fetch("/api/config")).json(); } catch {}
+  applyStrudel();
   try {
     const data = await api("/api/me", { noAuthRedirect: true });
     await enterApp(data);
